@@ -63,7 +63,7 @@ bistro-de-balzac/
 │  └─ pages/
 │     ├─ Login.jsx
 │     ├─ NewReport.jsx               ← RADNIK: unos popisa i pazara
-│     ├─ MyReports.jsx               ← RADNIK: istorija (4 po strani, pretraga)
+│     ├─ MyReports.jsx               ← RADNIK: istorija (8 po strani, pretraga)
 │     ├─ Profile.jsx                 ← RADNIK: slika, podaci, dnevnice, pravila
 │     ├─ MyEarnings.jsx              ← RADNIK: dnevnice, bonusi, isplate
 │     ├─ ReportDetail.jsx            ← detaljan pregled + potvrda (admin)
@@ -634,6 +634,3 @@ Skript sam odseca belu ivicu, centrira logo i pravi sve četiri PWA ikonice
 na ekranu prijave i na početnom ekranu telefona.
 
 **Nazivi smena** → `src/lib/utils.js`, niz `SHIFTS` + enum `shift_type` u SQL-u.
-
-
-

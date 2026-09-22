@@ -91,25 +91,37 @@ Bez nje ne možeš iz aplikacije da otvaraš naloge radnicima.
 4. **Deploy function**.
 
 ### 3.5 Prepiši dva ključa
-Levo dole **Project Settings** (zupčanik) → **API** (ili **Data API**). Zapiši:
-- **Project URL** — izgleda kao `https://abcdefgh.supabase.co`
-- **anon public** ključ — dugačak tekst koji počinje sa `eyJ…`
+Levo dole **Project Settings** (zupčanik):
+- **Data API** → **Project URL** — izgleda kao `https://abcdefgh.supabase.co`
+- **API Keys** → ključ **anon public** — dugačak tekst koji počinje sa `eyJ…`
+  (ako ga ne vidiš, otvori karticu **Legacy API keys**; može i novi
+  **publishable** ključ, koji počinje sa `sb_publishable_…`)
 
-> Ključ **service_role** nikome ne daješ i nigde ga ne upisuješ.
+> Ključ **service_role / secret** nikome ne daješ i nigde ga ne upisuješ.
 
 ---
 
 ## 4. Netlify — od koda pravi sajt
 
+> Netlify je preimenovao meni: „Sites“ su sada **Projects**, a „Site
+> configuration“ je **Project configuration**.
+
 1. **netlify.com** → **Sign up** → **GitHub** (dozvoli pristup).
-2. **Add new site** → **Import an existing project** → **GitHub**.
+2. **Add new project** → **Import an existing project** → **GitHub**.
 3. Izaberi repozitorijum `bistro-de-balzac`
    (ako ga ne vidiš: **Configure the Netlify app on GitHub** → dozvoli mu taj repo).
-4. Podešavanja build-a ostavi kako jesu — već su upisana u projektu:
-   - Build command: `npm run build`
-   - Publish directory: `dist`
-5. Klikni **Add environment variables** (ili posle: **Site configuration →
-   Environment variables**) i dodaj **četiri** stavke:
+4. Podešavanja build-a:
+   - **Base directory:** `bistro-de-balzac` — **samo ako** su na GitHub-u fajlovi
+     u folderu `bistro-de-balzac` (tako je kod tebe). Ako su `src`, `package.json`…
+     odmah na vrhu repozitorijuma, ostavi prazno.
+   - **Build command** i **Publish directory** ostavi kako jesu (`npm run build`
+     i `dist` su već upisani u fajlu `netlify.toml`; ako polje neće da primi
+     `dist`, samo ga preskoči).
+
+   Za već napravljen projekat ovo menjaš u **Project configuration →
+   Developer settings → Continuous deployment → Build settings → Configure**.
+5. **Project configuration → Environment variables → Add a variable →
+   Add a single variable** — dodaj **četiri** stavke:
 
    | Key | Value |
    |---|---|
@@ -118,13 +130,16 @@ Levo dole **Project Settings** (zupčanik) → **API** (ili **Data API**). Zapi�
    | `VITE_APP_NAME` | `Bistro de Balzac` |
    | `VITE_LOGIN_DOMAIN` | `bistrodebalzac.rs` |
 
-6. **Deploy**. Za 1–2 minuta dobijaš adresu, npr.
-   `https://nesto-nasumicno.netlify.app`.
-7. (Lepše ime) **Site configuration → Change site name** → `bistro-de-balzac`
-   → adresa postaje `https://bistro-de-balzac.netlify.app`.
+6. **Deploys → Trigger deploy → Deploy project** (dugme je iznad spiska
+   deploy-a, desno). Za 2–3 minuta dobijaš adresu, npr.
+   `https://nesto-nasumicno.netlify.app` — piše zelenim slovima na vrhu
+   stranice projekta.
+7. (Lepše ime) **Project configuration → General → Project details →
+   Change project name** → `bistro-de-balzac` → adresa postaje
+   `https://bistro-de-balzac.netlify.app`.
 
-> ⚠️ Ako kasnije promeniš neku od ovih promenljivih: **Deploys → Trigger deploy →
-> Deploy site**, inače se promena ne vidi.
+> ⚠️ Posle svake promene promenljivih ili podešavanja: **Deploys → Trigger
+> deploy → Deploy project**, inače se promena ne vidi.
 
 ---
 
@@ -172,12 +187,13 @@ Ako se menjao `supabase/schema.sql`, pokreni ga ponovo (korak 3.2).
 
 | Šta vidiš | Šta uraditi |
 |---|---|
+| **Page not found** (Netlify) | Aplikacija je u podfolderu — upiši **Base directory** `bistro-de-balzac` (korak 4), pa **Trigger deploy**. |
+| **Nedostaje Supabase konfiguracija** | Sajt radi, ali fale promenljive — upiši ih (korak 4, tačka 5), pa **Trigger deploy**. |
 | Netlify: **Deploy failed** | **Deploys** → klikni neuspeli deploy → kopiraj crveni tekst iz loga i pošalji ga meni. |
 | Sajt je beo / prazan | Proveri da su u Netlify-u upisane sve 4 promenljive, pa **Trigger deploy**. |
+| Nema dugmeta **Trigger deploy** | Projekat nije povezan sa GitHub-om: **Project configuration → Developer settings → Continuous deployment → Link repository**. |
 | „Invalid login credentials“ | Nalog iz 3.3 mora imati ✅ Auto Confirm User; proveri email i lozinku. |
 | Ne mogu da otvorim nalog radniku | Proveri korak 3.4 — funkcija mora da se zove tačno `manage-worker`. |
 | Ne vidim Radnici / Uplate | Nisi admin — ponovi SQL iz 3.3 sa tačnim emailom. |
 
-> Aplikacija je pisana i proveravana kroz demo, ali prava verzija još nije bila
-> pokrenuta. Prvi Netlify build je zato i prva provera — ako padne, samo mi
-> pošalji tekst greške i ispravljamo.
+> Ako nešto zapne, pošalji mi sliku ekrana ili tekst greške i ispravljamo.

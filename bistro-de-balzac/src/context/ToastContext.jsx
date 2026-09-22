@@ -15,7 +15,9 @@ export function ToastProvider({ children }) {
   const push = useCallback(
     (message, type = 'info', duration = 4000) => {
       const id = nextId++
-      setToasts((prev) => [...prev, { id, message, type }])
+      // Uvek samo jedno obaveštenje — novo zamenjuje staro. Inače, kad se
+      // dugme pritisne više puta, iste poruke se naslažu i prekriju ekran.
+      setToasts([{ id, message, type }])
       if (duration > 0) setTimeout(() => dismiss(id), duration)
       return id
     },
@@ -43,8 +45,9 @@ export function ToastProvider({ children }) {
             key={t.id}
             type="button"
             onClick={() => dismiss(t.id)}
+            // Diskretno, kao u demou: uža traka po sredini, duža poruka se prelomi.
             className={cx(
-              'pointer-events-auto w-full max-w-sm animate-slide-up rounded-xl px-4 py-3 text-left text-sm font-medium shadow-lg ring-1',
+              'pointer-events-auto w-fit max-w-[340px] animate-slide-up rounded-[14px] px-3.5 py-2 text-center text-[13px] font-semibold leading-snug shadow-lg ring-1',
               t.type === 'success' && 'bg-emerald-600 text-white ring-emerald-700',
               t.type === 'error' && 'bg-rose-600 text-white ring-rose-700',
               t.type === 'info' && 'bg-slate-900 text-white ring-slate-700',

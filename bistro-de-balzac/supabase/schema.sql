@@ -450,6 +450,10 @@ create trigger rule_docs_touch_updated_at
 
 -- 3.6 Radnik NE SME sam sebi da promeni ulogu niti da se deaktivira.
 --     Samo admin menja `role` i `is_active`.
+--     Izmene bez prijavljenog korisnika (auth.uid() je prazan) dolaze iz
+--     Supabase SQL Editora ili sa servera (Edge Function) — tamo može samo
+--     vlasnik, pa se propuštaju. Bez toga ni vlasnik ne bi mogao sebi da
+--     dodeli ulogu admina.
 create or replace function public.guard_profile_update()
 returns trigger
 language plpgsql
@@ -457,7 +461,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if not public.is_admin() then
+  if auth.uid() is not null and not public.is_admin() then
     new.role       := old.role;
     new.is_active  := old.is_active;
     new.is_deleted := old.is_deleted;
@@ -516,9 +520,11 @@ begin
 
   if v_id is null then
     begin
+      -- I status se mora zapamtiti — bez njega bi nova smena ispod izgledala
+      -- kao „već zatvorena“ i otvaranje bi se poništilo.
       insert into public.shift_reports (report_date, shift, created_by, status)
       values (p_date, p_shift, auth.uid(), 'otvoren')
-      returning id into v_id;
+      returning id, status into v_id, v_status;
     exception when unique_violation then
       -- Dvoje su kliknuli u istoj sekundi: uzmi onaj koji je upravo nastao.
       select id, status into v_id, v_status

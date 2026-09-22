@@ -80,6 +80,24 @@
     @apply mb-1.5 block text-[13px] font-medium text-stone-600;
   }
 
+  /* Sitan sivi tekst ispod polja ili dugmeta — objašnjenje, ne sadržaj. */
+  .hint {
+    @apply mt-1.5 text-xs leading-relaxed text-stone-500;
+  }
+
+  /* iPhone (Safari) polju za datum daje svoju najmanju širinu i centrira
+     tekst, pa polje izleti iz svoje kolone i uđe u susedno. */
+  input[type='date'].field {
+    min-width: 0;
+    min-height: 2.875rem;
+    -webkit-appearance: none;
+    appearance: none;
+    text-align: left;
+  }
+  input[type='date'].field::-webkit-date-and-time-value {
+    text-align: left;
+  }
+
   /* Kartice bez senki — samo vlas linije. Manje kutija u kutijama. */
   .card {
     @apply rounded-2xl border border-stone-200 bg-white;

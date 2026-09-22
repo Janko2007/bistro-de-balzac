@@ -835,7 +835,8 @@ export default function NewReport() {
         }
       />
       <div className="space-y-4 p-4">
-        <div className="grid grid-cols-2 gap-3">
+        {/* min-w-0: da nijedno polje ne izađe iz svoje polovine na uskom telefonu */}
+        <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
           <Field label="Datum">
             <Input
               type="date"
@@ -849,7 +850,7 @@ export default function NewReport() {
             <Select value={shift} disabled={!!reportId} onChange={(e) => setShift(e.target.value)}>
               {SHIFTS.map((s) => (
                 <option key={s.value} value={s.value}>
-                  {s.label} ({s.hint})
+                  {s.label}
                 </option>
               ))}
             </Select>
