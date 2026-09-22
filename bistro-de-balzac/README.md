@@ -634,3 +634,6 @@ Skript sam odseca belu ivicu, centrira logo i pravi sve četiri PWA ikonice
 na ekranu prijave i na početnom ekranu telefona.
 
 **Nazivi smena** → `src/lib/utils.js`, niz `SHIFTS` + enum `shift_type` u SQL-u.
+
+
+
