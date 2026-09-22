@@ -103,6 +103,23 @@
     @apply rounded-2xl border border-stone-200 bg-white;
   }
 
+  /* Fotografija lokala — samo na ekranu za prijavu, zatamnjena.
+     `position: fixed` + `cover`: uvek preko celog ekrana, bez praznog
+     prostora sa strane, na telefonu i na računaru. */
+  .login-bg {
+    position: relative;
+    isolation: isolate;
+  }
+  .login-bg::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: url('/pozadina.webp') center / cover no-repeat;
+    opacity: 0.22;
+    pointer-events: none;
+  }
+
   /* Sitan naslov iznad grupe podataka */
   .eyebrow {
     @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400;

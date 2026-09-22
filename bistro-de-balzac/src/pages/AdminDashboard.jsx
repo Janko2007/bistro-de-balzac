@@ -15,6 +15,7 @@ import {
   Stat,
 } from '../components/ui'
 import ReportListItem from '../components/ReportListItem'
+import ReportTrash from '../components/ReportTrash'
 import StorageCleanup from '../components/StorageCleanup'
 import {
   LOCALE,
@@ -441,6 +442,9 @@ export default function AdminDashboard() {
       </Card>
 
       {/* Održavanje prostora — da besplatnih 1 GB nikad ne popuniš */}
+      {/* Obrisani popisi — 12 sati mogu da se vrate */}
+      <ReportTrash onRestored={load} />
+
       <StorageCleanup />
     </div>
   )

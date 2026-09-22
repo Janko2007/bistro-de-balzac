@@ -514,6 +514,15 @@ Oboje se upisuju u istu tabelu `payouts`, razlikuje ih kolona `kind`. Radnik ist
 taj obračun vidi na svom ekranu **Profil**, sa spiskom svojih smena, bonusa i
 isplata.
 
+### Brisanje popisa
+
+**Obriši** u detaljima izveštaja ne briše odmah: popis nestane sa spiskova i iz
+obračuna (pazar, uplate, dnevnice), a radnik može ponovo da otvori istu smenu —
+ali se čuva još **12 sati** u **Pregled → Obrisani popisi**, odakle se vraća
+jednim klikom (**Vrati**). Posle 12 sati se briše trajno, zajedno sa slikama
+(tabela `report_trash`, funkcije `trash_report`, `restore_report`,
+`purge_report_trash`).
+
 ### Brisanje radnika
 
 Briše se nalog za prijavu. Ako iza radnika postoje popisi, **oni ostaju u istoriji**

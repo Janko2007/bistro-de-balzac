@@ -315,18 +315,16 @@ export default function ReportDetail() {
 
   async function handleDelete() {
     setWorking(true)
-    // Prvo obriši slike iz storage-a, pa red iz baze (cascade briše ostalo).
-    if (report?.images?.length) {
-      await supabase.storage.from('izvestaji').remove(report.images.map((i) => i.storage_path))
-    }
-    const { error } = await supabase.from('shift_reports').delete().eq('id', id)
+    // Ne briše se odmah: popis ide u korpu i 12 sati može da se vrati
+    // (Pregled → Obrisani popisi). Slike ostaju dok se korpa ne isprazni.
+    const { error } = await supabase.rpc('trash_report', { p_id: id })
     setWorking(false)
 
     if (error) {
       toast.error(errorMessage(error))
       return
     }
-    toast.success('Izveštaj je obrisan.')
+    toast.success('Popis je obrisan — 12 sati možeš da ga vratiš iz Pregleda.')
     navigate('/', { replace: true })
   }
 
@@ -896,14 +894,16 @@ export default function ReportDetail() {
               Otkaži
             </Button>
             <Button variant="danger" className="flex-1" loading={working} onClick={handleDelete}>
-              Obriši trajno
+              Obriši
             </Button>
           </div>
         }
       >
         <p className="text-sm text-slate-600">
-          Ovim se trajno brišu izveštaj, sve stavke popisa i priložene slike. Ova radnja se ne može
-          poništiti.
+          Popis odmah nestaje sa spiskova i iz obračuna, ali se čuva još{' '}
+          <strong>12 sati</strong> — do tada možeš da ga vratiš u{' '}
+          <strong>Pregled → Obrisani popisi</strong>. Posle toga se briše trajno, zajedno sa
+          slikama.
         </p>
       </Modal>
 

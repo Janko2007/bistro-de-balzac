@@ -54,7 +54,7 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-ink px-4 py-10 safe-top safe-bottom">
+    <div className="login-bg flex min-h-screen flex-col bg-ink px-4 py-10 safe-top safe-bottom">
       <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center">
         <div className="mb-8 text-center">
           <img
@@ -116,10 +116,6 @@ export default function Login() {
           <Button type="submit" size="lg" className="w-full" loading={submitting}>
             {submitting ? 'Prijavljivanje…' : 'Prijavi se'}
           </Button>
-
-          <p className="pt-1 text-center text-xs text-stone-500">
-            Nemaš nalog ili si zaboravio lozinku? Javi se vlasniku.
-          </p>
         </form>
       </div>
     </div>

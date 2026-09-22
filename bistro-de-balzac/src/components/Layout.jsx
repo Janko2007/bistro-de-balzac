@@ -65,7 +65,9 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 pb-20 lg:pb-0">
+    // Dole ima mesta za donju navigaciju — na iPhone-u i za prostor iznad
+    // crte za gašenje aplikacije, da poslednja kartica ne ostane ispod nje.
+    <div className="min-h-screen bg-slate-100 pb-[calc(76px+env(safe-area-inset-bottom,0px))] lg:pb-0">
       {/* ---------- Gornja traka ---------- */}
       <header className="sticky top-0 z-30 border-b border-ink-800 bg-ink text-white safe-top">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">

@@ -1408,8 +1408,12 @@ export default function NewReport() {
         </div>
       </Card>
 
-      {/* ---------- Fiksna traka sa dugmetom ---------- */}
-      <div className="fixed inset-x-0 bottom-[60px] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:safe-bottom">
+      {/* ---------- Fiksna traka sa dugmetom ----------
+          Stoji tačno iznad donje navigacije (56 px + linija). Na iPhone-u je
+          navigacija viša za prostor iznad crte za gašenje aplikacije — zato
+          se dodaje i `safe-area-inset-bottom`, inače bi traka upala pod nju.
+          Na računaru nema donje navigacije, pa je traka na samom dnu. */}
+      <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-xs text-stone-500">Predato</p>

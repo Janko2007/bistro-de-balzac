@@ -39,7 +39,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // webp — pozadinska slika lokala (pozadina.webp), da radi i bez interneta
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,webp}'],
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
         clientsClaim: true,
