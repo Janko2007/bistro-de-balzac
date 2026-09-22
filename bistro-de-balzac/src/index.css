@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    /* Aplikacija je isključivo svetla tema. Bez ovoga bi na uređaju u tamnom
+       režimu birači datuma i strelice na number poljima bili tamni. */
+    color-scheme: light;
+  }
+
+  /* Na računaru (miš/touchpad) traka za skrolovanje je UVEK prikazana. Bez
+     toga se pri prelasku sa duge na kratku stranu traka izgubi, sadržaj se
+     proširi i sve poskoči u stranu.
+     Namerno ne `scrollbar-gutter: stable` — on čuva prazan prostor i kad trake
+     nema, pa pored tamnog zaglavlja ostane svetla pruga.
+     Telefon se ne dira: tamo traka lebdi preko sadržaja i ne zauzima mesto. */
+  @media (hover: hover) and (pointer: fine) {
+    html {
+      overflow-y: scroll;
+    }
+  }
+
+  body {
+    @apply bg-paper text-stone-900 antialiased;
+    /* Sprečava "bounce" skrol na iOS-u kad je app u standalone modu */
+    overscroll-behavior-y: none;
+  }
+
+  /* Na mobilnom iOS zumira input ako je font manji od 16px.
+     Boja teksta mora da bude eksplicitna: polja imaju belu podlogu, a bez
+     ovoga preuzimaju sistemsku `fieldtext` boju — u tamnom režimu belu,
+     pa se uneti brojevi ne vide. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+    @apply text-slate-900;
+  }
+
+  /* Uklanja strelice sa number inputa */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  /* Polja bez senke — jedna tanka linija je dovoljna da se vidi da je polje. */
+  .field {
+    @apply w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-stone-900
+           outline-none transition
+           placeholder:text-stone-400
+           focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25
+           disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500;
+  }
+
+  /* Padajući meni — strelica desno, da se vidi da se otvara. */
+  select.field {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8a29e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 16px 16px;
+  }
+
+  .label {
+    @apply mb-1.5 block text-[13px] font-medium text-stone-600;
+  }
+
+  /* Kartice bez senki — samo vlas linije. Manje kutija u kutijama. */
+  .card {
+    @apply rounded-2xl border border-stone-200 bg-white;
+  }
+
+  /* Sitan naslov iznad grupe podataka */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400;
+  }
+}
+
+/* Animacija učitavanja */
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
