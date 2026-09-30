@@ -1,0 +1,21 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback — sve rute vraćaju index.html (React Router)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Service worker i manifest ne smeju da se keširaju "zauvek",
+# inače korisnici ostaju na staroj verziji aplikacije.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

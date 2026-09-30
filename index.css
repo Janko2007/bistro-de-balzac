@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    /* Aplikacija je isključivo svetla tema. Bez ovoga bi na uređaju u tamnom
+       režimu birači datuma i strelice na number poljima bili tamni. */
+    color-scheme: light;
+  }
+
+  /* Na računaru (miš/touchpad) traka za skrolovanje je UVEK prikazana. Bez
+     toga se pri prelasku sa duge na kratku stranu traka izgubi, sadržaj se
+     proširi i sve poskoči u stranu.
+     Namerno ne `scrollbar-gutter: stable` — on čuva prazan prostor i kad trake
+     nema, pa pored tamnog zaglavlja ostane svetla pruga.
+     Telefon se ne dira: tamo traka lebdi preko sadržaja i ne zauzima mesto. */
+  @media (hover: hover) and (pointer: fine) {
+    html {
+      overflow-y: scroll;
+    }
+  }
+
+  body {
+    @apply bg-paper text-stone-900 antialiased;
+    /* Sprečava "bounce" skrol na iOS-u kad je app u standalone modu */
+    overscroll-behavior-y: none;
+  }
+
+  /* Na mobilnom iOS zumira input ako je font manji od 16px.
+     Boja teksta mora da bude eksplicitna: polja imaju belu podlogu, a bez
+     ovoga preuzimaju sistemsku `fieldtext` boju — u tamnom režimu belu,
+     pa se uneti brojevi ne vide. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+    @apply text-stone-900;
+  }
+
+  /* Uklanja strelice sa number inputa */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  /* Polje je blago sivo dok ga ne diraš — pobeli tek kad kucaš u njemu.
+     Tako se forma čita kao niz polja, bez mreže tamnih linija. */
+  .field {
+    @apply w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-stone-900
+           outline-none transition
+           placeholder:text-stone-400
+           focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20
+           disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500;
+  }
+
+  /* Padajući meni — strelica desno, da se vidi da se otvara. */
+  select.field {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8a29e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 16px 16px;
+  }
+
+  .label {
+    @apply mb-1.5 block text-[12px] font-semibold text-stone-500;
+  }
+
+  /* Sitan sivi tekst ispod polja ili dugmeta — objašnjenje, ne sadržaj.
+     Kratko i u jednom redu; ako treba pasus, to nije hint nego sadržaj. */
+  .hint {
+    @apply mt-1.5 text-[12px] leading-snug text-stone-400;
+  }
+
+  /* iPhone (Safari) polju za datum daje svoju najmanju širinu i centrira
+     tekst, pa polje izleti iz svoje kolone i uđe u susedno. */
+  input[type='date'].field {
+    min-width: 0;
+    min-height: 2.875rem;
+    -webkit-appearance: none;
+    appearance: none;
+    text-align: left;
+  }
+  input[type='date'].field::-webkit-date-and-time-value {
+    text-align: left;
+  }
+
+  /* Kartica „lebdi“ jedva primetno — jedan piksel senke umesto tamne linije.
+     Zaobljenje je veće nego kod polja, pa se odmah vidi šta je grupa. */
+  .card {
+    @apply rounded-3xl border border-stone-200/70 bg-white shadow-[0_1px_2px_rgba(28,25,23,0.04)];
+  }
+
+  /* Fotografija lokala — samo na ekranu za prijavu, zatamnjena.
+     `position: fixed` + `cover`: uvek preko celog ekrana, bez praznog
+     prostora sa strane, na telefonu i na računaru. */
+  .login-bg {
+    position: relative;
+    isolation: isolate;
+  }
+  .login-bg::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: url('/pozadina.webp') center / cover no-repeat;
+    opacity: 0.22;
+    pointer-events: none;
+  }
+
+  /* Sitan naslov iznad grupe podataka */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400;
+  }
+}
+
+/* Animacija učitavanja */
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
