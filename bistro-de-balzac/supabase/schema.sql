@@ -121,8 +121,13 @@ create table if not exists public.items (
   unit        text        not null default 'kom',   -- kom, l, kg, flaša...
   sort_order  integer     not null default 100,
   is_active   boolean     not null default true,
+  -- Brojač (espresso): kasa broji unapred, pa je krajnje = početno + prodato,
+  -- a ne (početno + dodato) − prodato kao kod zaliha.
+  is_counter  boolean     not null default false,
   created_at  timestamptz not null default now()
 );
+
+alter table public.items add column if not exists is_counter boolean not null default false;
 
 create unique index if not exists items_name_unique_idx on public.items (lower(name));
 create index if not exists items_category_idx on public.items (category, sort_order);
@@ -206,15 +211,19 @@ create table if not exists public.shift_report_items (
   qty_added  numeric(12,2) check (qty_added >= 0),   -- Dodato
   qty_end    numeric(12,2) check (qty_end   >= 0),   -- Krajnje stanje
 
-  -- Ove dve računa baza — nema greške u sabiranju. `qty_sold` ostaje NULL dok
-  -- se ne upiše krajnje stanje, da se nepopisan artikal ne prikaže kao prodat.
   qty_new    numeric(12,2) generated always as (
                coalesce(qty_start, 0) + coalesce(qty_added, 0)
              ) stored,                                                        -- Novo stanje
-  qty_sold   numeric(12,2) generated always as (
-               case when qty_end is null then null
-                    else coalesce(qty_start, 0) + coalesce(qty_added, 0) - qty_end end
-             ) stored,                                                        -- Prodato
+
+  -- Prodato upisuje aplikacija, jer formula nije ista za sve artikle:
+  --   običan artikal  →  krajnje = (početno + dodato) − prodato
+  --   brojač          →  krajnje = početno + prodato
+  -- Ostaje NULL dok se ne popiše, da se nepopisan artikal ne prikaže kao prodat.
+  qty_sold   numeric(12,2),                                                   -- Prodato
+
+  -- Snimak oznake sa artikla (kao naziv i jedinica) — stari izveštaji ostaju
+  -- tačni i ako artikal kasnije prestane da bude brojač.
+  is_counter boolean not null default false,
 
   note       text not null default '',
   unique (report_id, item_id)
@@ -257,12 +266,30 @@ alter table public.shift_report_items
   add column if not exists qty_new numeric(12,2)
   generated always as (coalesce(qty_start, 0) + coalesce(qty_added, 0)) stored;
 
+-- Prodato je ranije računala baza, po jednoj jedinoj formuli. Otkako postoje
+-- artikli sa brojačem (espresso) formula nije ista za sve, pa prodato upisuje
+-- aplikacija. Postojeće vrednosti se prenose netaknute.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name   = 'shift_report_items'
+      and column_name  = 'qty_sold'
+      and is_generated = 'ALWAYS'
+  ) then
+    alter table public.shift_report_items rename column qty_sold to qty_sold_stara;
+    alter table public.shift_report_items add column qty_sold numeric(12,2);
+    update public.shift_report_items set qty_sold = qty_sold_stara;
+    alter table public.shift_report_items drop column qty_sold_stara;
+  end if;
+end $$;
+
 alter table public.shift_report_items
-  add column if not exists qty_sold numeric(12,2)
-  generated always as (
-    case when qty_end is null then null
-         else coalesce(qty_start, 0) + coalesce(qty_added, 0) - qty_end end
-  ) stored;
+  add column if not exists qty_sold numeric(12,2);
+
+alter table public.shift_report_items
+  add column if not exists is_counter boolean not null default false;
 
 create index if not exists shift_report_items_report_idx on public.shift_report_items (report_id);
 
@@ -1303,16 +1330,18 @@ begin
     r.admin_note_by, r.admin_note_at, r.created_at, r.updated_at
   );
 
-  insert into public.shift_report_staff (report_id, profile_id)
-  select s.report_id, s.profile_id
+  insert into public.shift_report_staff (report_id, profile_id, wage_override)
+  select s.report_id, s.profile_id, s.wage_override
   from jsonb_populate_recordset(null::public.shift_report_staff, v_t.data -> 'staff') s
   where exists (select 1 from public.profiles p where p.id = s.profile_id);
 
   insert into public.shift_report_items (
-    id, report_id, item_id, item_name, unit, category, qty_start, qty_added, qty_end, note
+    id, report_id, item_id, item_name, unit, category,
+    qty_start, qty_added, qty_end, qty_sold, is_counter, note
   )
   select i.id, i.report_id, i.item_id, i.item_name, i.unit, i.category,
-         i.qty_start, i.qty_added, i.qty_end, i.note
+         i.qty_start, i.qty_added, i.qty_end, i.qty_sold,
+         coalesce(i.is_counter, false), i.note
   from jsonb_populate_recordset(null::public.shift_report_items, v_t.data -> 'items') i
   where exists (select 1 from public.items it where it.id = i.item_id);
 

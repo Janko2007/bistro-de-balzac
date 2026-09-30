@@ -273,15 +273,45 @@ export default function AdminDeposits() {
     load()
   }
 
+  /**
+   * Brisanje uplate.
+   *
+   * Dani se brišu prvo, pa tek onda sama uplata — baza to radi i sama
+   * (`on delete cascade`), ali u starijim bazama ta veza nije bila
+   * postavljena, pa bi brisanje palo na vezanim redovima.
+   *
+   * `select()` posle brisanja vraća obrisane redove. Ako se ne vrati nijedan,
+   * uplata NIJE obrisana (npr. nalog nema admin prava) — a bez ove provere
+   * aplikacija bi prijavila uspeh iako se ništa nije promenilo.
+   */
   async function deleteDeposit() {
     const deposit = modal.deposit
     setWorking(true)
-    const { error } = await supabase.from('cash_deposits').delete().eq('id', deposit.id)
+
+    const daysRes = await supabase
+      .from('cash_deposit_days')
+      .delete()
+      .eq('deposit_id', deposit.id)
+
+    if (daysRes.error) {
+      setWorking(false)
+      return toast.error(errorMessage(daysRes.error))
+    }
+
+    const { data, error } = await supabase
+      .from('cash_deposits')
+      .delete()
+      .eq('id', deposit.id)
+      .select('id')
     setWorking(false)
 
     if (error) return toast.error(errorMessage(error))
+    if (!data || data.length === 0) {
+      return toast.error('Uplata nije obrisana. Proveri da si prijavljen kao admin.')
+    }
+
     setModal(null)
-    toast.success('Uplata je poništena — dani se vraćaju u „za uplatu“.')
+    toast.success('Uplata je obrisana — dani se vraćaju u „za uplatu“.')
     load()
   }
 
@@ -710,7 +740,7 @@ export default function AdminDeposits() {
                       className="mt-0.5 text-rose-600"
                       onClick={() => setModal({ kind: 'undo', deposit })}
                     >
-                      Poništi
+                      Obriši
                     </Button>
                   </div>
                 </div>
@@ -822,7 +852,7 @@ export default function AdminDeposits() {
       <Modal
         open={modal?.kind === 'undo'}
         onClose={() => !working && setModal(null)}
-        title="Poništi uplatu"
+        title="Da li si siguran?"
         size="sm"
         footer={
           <div className="flex gap-2">
@@ -832,21 +862,21 @@ export default function AdminDeposits() {
               disabled={working}
               onClick={() => setModal(null)}
             >
-              Otkaži
+              Ne, vrati me
             </Button>
             <Button variant="danger" className="flex-1" loading={working} onClick={deleteDeposit}>
-              Poništi uplatu
+              Da, obriši
             </Button>
           </div>
         }
       >
         <p className="text-sm text-stone-600">
-          Uplata od <strong>{formatDate(modal?.deposit?.deposited_on)}</strong> na iznos{' '}
-          <strong>{formatMoney(modal?.deposit?.amount)}</strong> se briše.
+          Briše se uplata od <strong>{formatDate(modal?.deposit?.deposited_on)}</strong> na iznos{' '}
+          <strong>{formatMoney(modal?.deposit?.amount, false)}</strong>.
         </p>
-        <p className="mt-2 text-sm text-stone-600">
-          Dani koje je pokrivala ({(modal?.deposit?.cash_deposit_days ?? []).length}) vraćaju se u
-          spisak „za uplatu“. Sami popisi se ne diraju.
+        <p className="mt-2 text-[13px] text-stone-400">
+          {countLabel((modal?.deposit?.cash_deposit_days ?? []).length, 'dan')} se vraća u „za
+          uplatu“. Popisi se ne diraju.
         </p>
       </Modal>
     </div>

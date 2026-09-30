@@ -1,9 +1,14 @@
 -- =====================================================================
---  BISTRO DE BALZAC — ažuriranje baze (umanjena dnevnica za jedan dan)
+--  BISTRO DE BALZAC — ažuriranje baze
+--    1) umanjena dnevnica za jedan dan
+--    2) popravka brisanja uplate pazara
 --
 --  Šta ovo radi:
 --    Na svakom izveštaju možeš pojedinom radniku da UMANJIŠ dnevnicu baš
 --    za taj dan — npr. ako je došao kasnije ili odradio pola smene.
+--
+--    Uz to popravlja i brisanje uplate u Uplatama: u starijim bazama je
+--    brisanje padalo jer dani koje je uplata pokrivala nisu nestajali s njom.
 --
 --    Upisani iznos zamenjuje njegovu redovnu dnevnicu SAMO za taj dan.
 --    Prazno polje znači „puna dnevnica“, kao i do sada.
@@ -37,6 +42,33 @@ end $$;
 drop policy if exists "staff_update" on public.shift_report_staff;
 create policy "staff_update"
   on public.shift_report_staff for update
+  to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+
+
+-- 3) Brisanje uplate pazara
+--    Kad se obriše uplata, moraju da nestanu i dani koje je pokrivala — inače
+--    baza odbije brisanje, pa dugme „Obriši“ u Uplatama ne radi. U starijim
+--    bazama ta veza nije bila postavljena, zato se ovde popravlja.
+alter table public.cash_deposit_days
+  drop constraint if exists cash_deposit_days_deposit_id_fkey;
+
+alter table public.cash_deposit_days
+  add constraint cash_deposit_days_deposit_id_fkey
+    foreign key (deposit_id) references public.cash_deposits (id) on delete cascade;
+
+--    Uplate su isključivo adminova stvar — i upis i brisanje.
+drop policy if exists "deposits_admin" on public.cash_deposits;
+create policy "deposits_admin"
+  on public.cash_deposits for all
+  to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+
+drop policy if exists "deposit_days_admin" on public.cash_deposit_days;
+create policy "deposit_days_admin"
+  on public.cash_deposit_days for all
   to authenticated
   using (public.is_admin())
   with check (public.is_admin());

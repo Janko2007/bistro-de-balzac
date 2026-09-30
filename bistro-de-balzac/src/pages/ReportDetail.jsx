@@ -75,7 +75,7 @@ export default function ReportDetail() {
         staff:shift_report_staff ( wage_override, profile:profiles ( id, full_name, pay_model, daily_wage ) ),
         items:shift_report_items (
           id, item_id, item_name, unit, category,
-          qty_start, qty_added, qty_new, qty_sold, qty_end, note
+          qty_start, qty_added, qty_new, qty_sold, qty_end, is_counter, note
         ),
         images:report_images ( id, storage_path, created_at )
       `,
@@ -134,7 +134,7 @@ export default function ReportDetail() {
       .catch(() => setCategories([]))
     supabase
       .from('items')
-      .select('id, name, category, unit, sort_order, is_active, created_at')
+      .select('id, name, category, unit, sort_order, is_active, is_counter, created_at')
       .order('sort_order', { ascending: true })
       .then(({ data }) => setCatalog(data ?? []))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -172,6 +172,7 @@ export default function ReportDetail() {
         qty_new: null,
         qty_sold: null,
         qty_end: null,
+        is_counter: !!c.is_counter,
         missing: true,
         sort: c.sort_order,
       })
@@ -403,8 +404,9 @@ export default function ReportDetail() {
             item.missing ? `${item.item_name} — nije popisano` : item.item_name,
             item.unit,
             formatQty(item.qty_start),
-            formatQty(item.qty_added),
-            formatQty(item.qty_new),
+            // Brojač se ne dopunjava — te dve kolone kod njega nemaju smisla.
+            item.is_counter ? '—' : formatQty(item.qty_added),
+            item.is_counter ? '—' : formatQty(item.qty_new),
             { value: formatQty(item.qty_sold), strong: !item.missing },
             formatQty(item.qty_end),
           ],
@@ -892,11 +894,13 @@ export default function ReportDetail() {
                               <td className="px-2 py-2 text-right tabular-nums text-stone-500">
                                 {formatQty(item.qty_start)}
                               </td>
+                              {/* Brojač se ne dopunjava — „dodato“ i „novo
+                                  stanje“ kod njega nemaju smisla. */}
                               <td className="px-2 py-2 text-right tabular-nums text-stone-500">
-                                {formatQty(item.qty_added)}
+                                {item.is_counter ? '—' : formatQty(item.qty_added)}
                               </td>
                               <td className="px-2 py-2 text-right tabular-nums text-stone-500">
-                                {formatQty(item.qty_new)}
+                                {item.is_counter ? '—' : formatQty(item.qty_new)}
                               </td>
                               <td
                                 className={cx(

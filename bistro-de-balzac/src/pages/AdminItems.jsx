@@ -31,6 +31,7 @@ const emptyForm = {
   unit: 'kom',
   sort_order: 100,
   is_active: true,
+  is_counter: false,
 }
 
 export default function AdminItems() {
@@ -87,20 +88,34 @@ export default function AdminItems() {
     })
   }
 
-  const grouped = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    const filtered = items
-      .filter((i) => showInactive || i.is_active)
-      .filter((i) => !term || i.name.toLowerCase().includes(term) || i.category.toLowerCase().includes(term))
+  /** Traženi pojam — isti filter za aktivne i za isključene. */
+  const matches = useCallback(
+    (item) => {
+      const term = search.trim().toLowerCase()
+      if (!term) return true
+      return (
+        item.name.toLowerCase().includes(term) || item.category.toLowerCase().includes(term)
+      )
+    },
+    [search],
+  )
 
+  const grouped = useMemo(() => {
     const map = new Map()
-    for (const item of filtered) {
+    for (const item of items.filter((i) => i.is_active && matches(i))) {
       if (!map.has(item.category)) map.set(item.category, [])
       map.get(item.category).push(item)
     }
     // Redosled kategorija je onaj koji je admin podesio.
     return Array.from(map.entries()).sort((a, b) => compareCats(a[0], b[0]))
-  }, [items, search, showInactive, compareCats])
+  }, [items, matches, compareCats])
+
+  /* Isključeni artikli ne stoje među aktivnima — sklonjeni su na dno, iza
+     dugmeta, odakle se jednim klikom vraćaju u popis. */
+  const inactiveItems = useMemo(
+    () => items.filter((i) => !i.is_active && matches(i)),
+    [items, matches],
+  )
 
   /** Aktivni artikli po kategorijama — osnova za obrazac koji se štampa. */
   const printableGroups = useMemo(() => {
@@ -177,6 +192,7 @@ export default function AdminItems() {
       unit: item.unit,
       sort_order: item.sort_order,
       is_active: item.is_active,
+      is_counter: !!item.is_counter,
     })
     setModalOpen(true)
   }
@@ -196,6 +212,7 @@ export default function AdminItems() {
       unit: form.unit,
       sort_order: Number(form.sort_order) || 100,
       is_active: form.is_active,
+      is_counter: !!form.is_counter,
     }
 
     const { error } = form.id
@@ -228,6 +245,11 @@ export default function AdminItems() {
     else {
       setItems((prev) =>
         prev.map((i) => (i.id === item.id ? { ...i, is_active: !i.is_active } : i)),
+      )
+      toast.success(
+        item.is_active
+          ? `${item.name} je isključen — nađeš ga dole pod „Isključeni“.`
+          : `${item.name} je vraćen u popis.`,
       )
     }
   }
@@ -335,15 +357,6 @@ export default function AdminItems() {
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 min-w-[180px]"
           />
-          <label className="flex shrink-0 items-center gap-2 text-sm font-medium text-stone-600">
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
-              className="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500"
-            />
-            Prikaži isključene
-          </label>
         </div>
 
         {grouped.length === 0 ? (
@@ -386,6 +399,11 @@ export default function AdminItems() {
                               isključen
                             </Badge>
                           )}
+                          {item.is_counter && (
+                            <Badge className="bg-brand-50 text-brand-700 ring-brand-600/20">
+                              brojač
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-stone-400">
                           {item.unit} · redosled {item.sort_order}
@@ -393,7 +411,7 @@ export default function AdminItems() {
                       </div>
 
                       <Button variant="ghost" size="sm" onClick={() => toggleActive(item)}>
-                        {item.is_active ? 'Isključi' : 'Uključi'}
+                        {item.is_active ? 'Isključi' : 'Vrati'}
                       </Button>
                       <Button variant="secondary" size="sm" onClick={() => openEdit(item)}>
                         Izmeni
@@ -411,6 +429,67 @@ export default function AdminItems() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ---------- Isključeni artikli ---------- */}
+        {inactiveItems.length > 0 && (
+          <div className="border-t border-stone-100">
+            <button
+              type="button"
+              onClick={() => setShowInactive((v) => !v)}
+              aria-expanded={showInactive}
+              className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition hover:bg-stone-50"
+            >
+              <svg
+                className={cx(
+                  'h-4 w-4 shrink-0 text-stone-400 transition-transform',
+                  showInactive && 'rotate-90',
+                )}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+              <span className="text-[13px] font-semibold text-stone-600">Isključeni</span>
+              <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-stone-500">
+                {inactiveItems.length}
+              </span>
+              <span className="ml-auto text-[12px] text-stone-400">
+                {showInactive ? 'sakrij' : 'prikaži'}
+              </span>
+            </button>
+
+            {showInactive && (
+              <div className="divide-y divide-stone-100 border-t border-stone-100">
+                {inactiveItems.map((item) => (
+                  <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 opacity-70">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-stone-800">{item.name}</p>
+                      <p className="text-xs text-stone-400">
+                        {item.category} · {item.unit}
+                      </p>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => toggleActive(item)}>
+                      Vrati u popis
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-rose-600"
+                      onClick={() => setConfirmDelete(item)}
+                    >
+                      Obriši
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         </>
@@ -496,6 +575,23 @@ export default function AdminItems() {
               className="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500"
             />
             Aktivan (prikazuje se radnicima u popisu)
+          </label>
+
+          {/* Brojač: kasa broji unapred (espresso), pa se krajnje stanje
+              računa kao početno + prodato, a ne kao kod zaliha. */}
+          <label className="flex items-start gap-2 text-sm font-medium text-stone-700">
+            <input
+              type="checkbox"
+              checked={form.is_counter}
+              onChange={(e) => setForm((f) => ({ ...f, is_counter: e.target.checked }))}
+              className="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span>
+              Broji unapred (brojač)
+              <span className="mt-0.5 block text-[12px] font-normal text-stone-400">
+                Krajnje = početno + prodato. Za espresso i slično, gde brojač samo raste.
+              </span>
+            </span>
           </label>
 
           <div className="flex gap-2 pt-2">

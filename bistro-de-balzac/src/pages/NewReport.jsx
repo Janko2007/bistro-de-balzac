@@ -46,8 +46,8 @@ const SAVE_DEBOUNCE_MS = 600
  *
  * Radnik upisuje PRODATO, a KRAJNJE STANJE se računa:
  *   krajnje = (početno + dodato) − prodato
- * U bazi se i dalje čuva krajnje stanje (qty_end), a prodato (qty_sold) baza
- * izračuna sama — tako svi izveštaji i zbirovi rade kao i ranije.
+ * U bazi se čuvaju i prodato (qty_sold) i krajnje stanje (qty_end) — krajnje
+ * se računa iz prodatog, a formula zavisi od toga da li je artikal brojač.
  */
 const EMPTY_ROW = { s: '', d: '', p: '' }
 
@@ -73,21 +73,27 @@ function toDb(value) {
   return Number.isFinite(num) && num >= 0 ? num : null
 }
 
-/** Krajnje stanje = (početno + dodato) − prodato. */
-function endOf(row) {
-  return round2(parseNumber(row.s) + parseNumber(row.d) - parseNumber(row.p))
+/**
+ * Krajnje stanje.
+ *
+ *   zalihe   →  (početno + dodato) − prodato
+ *   brojač   →  početno + prodato
+ *
+ * Brojač je artikal kod koga kasa broji unapred (espresso): ako je na početku
+ * smene bilo 5, a prodato 5, na kraju smene stoji 10.
+ */
+function endOf(row, counter = false) {
+  const start = parseNumber(row.s)
+  const sold = parseNumber(row.p)
+  return counter ? round2(start + sold) : round2(start + parseNumber(row.d) - sold)
 }
 
-/** Red iz baze (početno, dodato, krajnje) u polja popisa (početno, dodato, prodato). */
+/** Red iz baze u polja popisa (početno, dodato, prodato). */
 function rowFromDb(dbRow) {
-  const hasEnd = dbRow.qty_end !== null && dbRow.qty_end !== undefined
-  const sold = hasEnd
-    ? round2((Number(dbRow.qty_start) || 0) + (Number(dbRow.qty_added) || 0) - Number(dbRow.qty_end))
-    : null
   return {
     s: toField(dbRow.qty_start),
     d: toField(dbRow.qty_added),
-    p: toField(sold),
+    p: toField(dbRow.qty_sold),
   }
 }
 
@@ -209,7 +215,7 @@ export default function NewReport() {
       const [itemsRes, cats, peopleRes, rulesRes] = await Promise.all([
         supabase
           .from('items')
-          .select('id, name, category, unit, sort_order')
+          .select('id, name, category, unit, sort_order, is_counter')
           .eq('is_active', true)
           .order('sort_order', { ascending: true }),
         loadCategories().catch(() => []),
@@ -349,7 +355,7 @@ export default function NewReport() {
           .single(),
         supabase
           .from('shift_report_items')
-          .select('item_id, qty_start, qty_added, qty_end')
+          .select('item_id, qty_start, qty_added, qty_end, qty_sold')
           .eq('report_id', id),
       ])
 
@@ -476,7 +482,8 @@ export default function NewReport() {
 
       // Prodato veće od novog stanja → krajnje bi bilo negativno. Takav red se
       // ne upisuje dok se ne ispravi (ostaje „neupisan“, pa ga kolega ne pregazi).
-      if (isDone(row) && endOf(row) < 0) return
+      // Brojač nema to ograničenje — kod njega krajnje samo raste.
+      if (isDone(row) && endOf(row, item?.is_counter) < 0) return
 
       let error = null
       if (blank) {
@@ -496,8 +503,11 @@ export default function NewReport() {
             category: item.category,
             qty_start: toDb(row.s),
             qty_added: toDb(row.d),
-            // Krajnje stanje se računa iz upisanog prodatog.
-            qty_end: isDone(row) ? endOf(row) : null,
+            // Radnik upisuje prodato; krajnje stanje se iz njega računa —
+            // kod brojača po svojoj formuli (početno + prodato).
+            qty_sold: isDone(row) ? toDb(row.p) : null,
+            qty_end: isDone(row) ? endOf(row, item.is_counter) : null,
+            is_counter: !!item.is_counter,
           },
           { onConflict: 'report_id,item_id' },
         ))
@@ -732,7 +742,7 @@ export default function NewReport() {
 
   /** Artikli kod kojih je prodato veće od novog stanja — greška u unosu. */
   const errorCount = useMemo(
-    () => items.filter((i) => isDone(rows[i.id]) && endOf(rows[i.id]) < 0).length,
+    () => items.filter((i) => isDone(rows[i.id]) && endOf(rows[i.id], i.is_counter) < 0).length,
     [items, rows],
   )
 
@@ -1220,15 +1230,16 @@ export default function NewReport() {
                   }
                 />
 
-                {/* Legenda kolona — vidi se samo kad je kategorija otvorena */}
+                {/* Legenda kolona — vidi se samo kad je kategorija otvorena.
+                    Polja su široka 78px da i petocifren broj stane ceo. */}
                 {open && (
-                  <div className="flex items-center justify-end gap-2 border-b border-stone-100 bg-white px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+                  <div className="flex items-center justify-end gap-1.5 border-b border-stone-100 bg-white px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
                     {COLUMNS.map((c) => (
-                      <span key={c.key} className="w-[58px] text-center">
+                      <span key={c.key} className="w-[78px] text-center">
                         {c.short}
                       </span>
                     ))}
-                    <span className="w-[48px] text-right">Kraj</span>
+                    <span className="w-[70px] text-right">Kraj</span>
                   </div>
                 )}
 
@@ -1237,7 +1248,10 @@ export default function NewReport() {
                     const row = rows[item.id] ?? EMPTY_ROW
                     const done = isDone(row)
                     const half = isStarted(row) && !done
-                    const end = endOf(row) // krajnje stanje, računa se
+                    // Brojač (espresso): krajnje = početno + prodato, i nema
+                    // „dodato“ — kasa broji unapred, ne popisuju se zalihe.
+                    const counter = !!item.is_counter
+                    const end = endOf(row, counter) // krajnje stanje, računa se
                     const bad = done && end < 0
 
                     return (
@@ -1256,41 +1270,59 @@ export default function NewReport() {
                           <p className="text-sm font-semibold leading-tight text-stone-800">
                             {item.name}
                           </p>
-                          <p className="text-xs text-stone-400">{item.unit}</p>
+                          <p className="text-xs text-stone-400">
+                            {item.unit}
+                            {counter && ' · brojač'}
+                          </p>
                         </div>
 
-                        <div className="ml-auto flex items-center gap-2">
-                          {COLUMNS.map((c) => (
-                            <input
-                              key={c.key}
-                              type="number"
-                              inputMode="decimal"
-                              step="0.01"
-                              min="0"
-                              placeholder="0"
-                              aria-label={`${item.name} — ${c.label}`}
-                              value={row[c.key]}
-                              onFocus={(e) => e.target.select()}
-                              onChange={(e) => setCell(item.id, c.key, e.target.value)}
-                              className={cx(
-                                'w-[58px] rounded-lg border px-1.5 py-2 text-center text-base font-bold tabular-nums outline-none transition',
-                                c.key === 'p' && half
-                                  ? 'border-amber-400 bg-white focus:ring-2 focus:ring-amber-500/30'
-                                  : c.key === 'p' && done && !bad
-                                    ? 'border-emerald-400 bg-white text-emerald-800 focus:ring-2 focus:ring-emerald-500/30'
-                                    : bad && c.key === 'p'
-                                      ? 'border-rose-400 bg-white text-rose-700 focus:ring-2 focus:ring-rose-500/30'
-                                      : 'border-stone-300 bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30',
-                              )}
-                            />
-                          ))}
+                        <div className="ml-auto flex items-center gap-1.5">
+                          {COLUMNS.map((c) =>
+                            /* Brojač nema „dodato“ — ništa se ne dopunjava. */
+                            counter && c.key === 'd' ? (
+                              <span
+                                key={c.key}
+                                className="w-[78px] text-center text-sm text-stone-300"
+                                aria-hidden="true"
+                              >
+                                —
+                              </span>
+                            ) : (
+                              <input
+                                key={c.key}
+                                type="number"
+                                inputMode="decimal"
+                                step="0.01"
+                                min="0"
+                                placeholder="0"
+                                aria-label={`${item.name} — ${c.label}`}
+                                value={row[c.key]}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => setCell(item.id, c.key, e.target.value)}
+                                className={cx(
+                                  'w-[78px] rounded-lg border px-1.5 py-2.5 text-center text-base font-bold tabular-nums outline-none transition',
+                                  c.key === 'p' && half
+                                    ? 'border-amber-400 bg-white focus:ring-2 focus:ring-amber-500/30'
+                                    : c.key === 'p' && done && !bad
+                                      ? 'border-emerald-400 bg-white text-emerald-800 focus:ring-2 focus:ring-emerald-500/30'
+                                      : bad && c.key === 'p'
+                                        ? 'border-rose-400 bg-white text-rose-700 focus:ring-2 focus:ring-rose-500/30'
+                                        : 'border-stone-300 bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30',
+                                )}
+                              />
+                            ),
+                          )}
 
                           <span
                             className={cx(
-                              'w-[48px] shrink-0 text-right text-sm font-extrabold tabular-nums',
+                              'w-[70px] shrink-0 text-right text-base font-extrabold tabular-nums',
                               bad ? 'text-rose-600' : done ? 'text-stone-900' : 'text-stone-300',
                             )}
-                            title="Krajnje stanje = (početno + dodato) − prodato"
+                            title={
+                              counter
+                                ? 'Brojač: krajnje stanje = početno + prodato'
+                                : 'Krajnje stanje = (početno + dodato) − prodato'
+                            }
                           >
                             {done ? formatQty(end) : '—'}
                           </span>

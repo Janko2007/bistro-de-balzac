@@ -247,19 +247,23 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
         role="dialog"
         aria-modal="true"
         className={cx(
-          'relative z-10 max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-white shadow-2xl animate-slide-up sm:rounded-3xl',
+          'modal-panel relative z-10 w-full overflow-y-auto rounded-t-3xl bg-white shadow-2xl animate-slide-up sm:rounded-3xl',
           size === 'sm' && 'sm:max-w-sm',
           size === 'md' && 'sm:max-w-lg',
           size === 'lg' && 'sm:max-w-3xl',
           size === 'xl' && 'sm:max-w-5xl',
         )}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-100 bg-white px-4 py-3.5">
-          <h2 className="text-[15px] font-bold tracking-tight text-stone-900">{title}</h2>
+        {/* `min-w-0 truncate` na naslovu i `shrink-0` na × — bez toga duže ime
+            radnika gurne × van ekrana, pa prozor ne može da se zatvori. */}
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-stone-100 bg-white px-4 py-3.5">
+          <h2 className="min-w-0 truncate text-[15px] font-bold tracking-tight text-stone-900">
+            {title}
+          </h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
+            className="-mr-1 shrink-0 rounded-lg p-2 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
             aria-label="Zatvori"
           >
             <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">

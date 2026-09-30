@@ -24,7 +24,8 @@ Levo klikni **SQL Editor** → **New query**. Onda, jedan po jedan:
 | --- | --- | --- |
 | 1. | `AZURIRANJE-BAZE-2.sql` | prijava imenom i prezimenom, korpa, pravila |
 | 2. | `AZURIRANJE-BAZE-3.sql` | izbor *dnevnica / plata* i procenat |
-| 3. | `AZURIRANJE-BAZE-4.sql` | umanjena dnevnica za pojedini dan |
+| 3. | `AZURIRANJE-BAZE-4.sql` | umanjena dnevnica za dan + brisanje uplate |
+| 4. | `AZURIRANJE-BAZE-5.sql` | artikal sa brojačem (espresso) |
 
 Za svaki: otvori fajl iz ovog foldera, označi sve (**Ctrl + A**), kopiraj
 (**Ctrl + C**), nalepi u Supabase (**Ctrl + V**), klikni **Run**. Dole treba da
@@ -140,6 +141,25 @@ Zato:
 ---
 
 ## Šta je novo u ovoj verziji
+
+### Artikal sa brojačem (espresso)
+
+Kod kafe kasa broji unapred — brojač samo raste. Zato takav artikal ima svoje
+računanje:
+
+```
+običan artikal  →  krajnje = (početno + dodato) − prodato
+brojač          →  krajnje = početno + prodato
+```
+
+Ako je na početku smene brojač bio **5**, a prodato je **5** kafa, na kraju
+smene piše **10**.
+
+Uključuje se u **Artikli → Izmeni** kod tog artikla → **„Broji unapred
+(brojač)"**. Posle toga u popisu kod njega nema polja *Dodato* (stoji crtica),
+a u spisku artikala nosi oznaku **brojač**.
+
+Uz to su **polja u popisu proširena**, da i petocifren broj brojača stane ceo.
 
 ### Međusmena ulazi i u prvu i u drugu smenu
 
