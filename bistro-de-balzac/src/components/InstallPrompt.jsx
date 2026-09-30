@@ -49,17 +49,17 @@ export default function InstallPrompt() {
   if (!deferred && !showIosHint) return null
 
   return (
-    <div className="fixed inset-x-3 bottom-20 z-40 animate-slide-up rounded-2xl border border-slate-200 bg-white p-4 shadow-xl lg:inset-x-auto lg:right-5 lg:bottom-5 lg:max-w-sm">
+    <div className="fixed inset-x-3 bottom-20 z-40 animate-slide-up rounded-2xl border border-stone-200 bg-white p-4 shadow-xl lg:inset-x-auto lg:right-5 lg:bottom-5 lg:max-w-sm">
       <div className="flex items-start gap-3">
         <img src="/icons/icon-192.png" alt="" className="h-10 w-10 shrink-0 rounded-xl" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-slate-900">Instaliraj aplikaciju</p>
+          <p className="text-sm font-bold text-stone-900">Instaliraj aplikaciju</p>
           {deferred ? (
-            <p className="mt-0.5 text-xs text-slate-600">
+            <p className="mt-0.5 text-xs text-stone-600">
               Dodaj je na početni ekran — otvara se kao prava aplikacija, bez pretraživača.
             </p>
           ) : (
-            <p className="mt-0.5 text-xs text-slate-600">
+            <p className="mt-0.5 text-xs text-stone-600">
               Pritisni <span className="font-semibold">Podeli</span> (ikonica sa strelicom), pa{' '}
               <span className="font-semibold">„Dodaj na početni ekran“</span>.
             </p>

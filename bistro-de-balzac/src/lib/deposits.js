@@ -11,7 +11,7 @@ import { LOCALE, todayISO } from './utils'
  * potrebe nabrajati dane.
  *
  * Raspored je samo podsetnik. Šta je stvarno uplaćeno zna baza: tamo stoji
- * spisak uplaćenih dana, pa vlasnik može da uplati i mimo rasporeda i da
+ * spisak uplaćenih dana, pa admin može da uplati i mimo rasporeda i da
  * označi baš one dane koje je pokrio.
  */
 
@@ -46,7 +46,10 @@ export function isDue(dueDate) {
 
 /** "ponedeljak" */
 export function weekdayName(dateISO) {
-  return new Intl.DateTimeFormat(LOCALE, { weekday: 'long' }).format(toDate(dateISO))
+  const d = toDate(dateISO)
+  // Prazan ili neispravan datum (npr. obrisano polje) — bez rušenja ekrana.
+  if (Number.isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat(LOCALE, { weekday: 'long' }).format(d)
 }
 
 /** "pon 22.09." — za uske prikaze i čipove */

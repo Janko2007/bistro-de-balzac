@@ -30,6 +30,6 @@ export function sectionUnder(body, heading) {
 /** Dnevne obaveze za dan u kome je smena (npr. „Utorak“ + tekst ispod). */
 export function dailyTaskFor(docs, dateISO) {
   const day = weekdayName(dateISO)
-  const text = sectionUnder(findDailyDoc(docs)?.body, day)
+  const text = day ? sectionUnder(findDailyDoc(docs)?.body, day) : ''
   return { day: day.charAt(0).toUpperCase() + day.slice(1), text }
 }

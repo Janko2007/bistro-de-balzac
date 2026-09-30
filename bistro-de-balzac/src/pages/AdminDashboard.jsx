@@ -13,10 +13,13 @@ import {
   Select,
   Spinner,
   Stat,
+  StatRow,
 } from '../components/ui'
 import ReportListItem from '../components/ReportListItem'
+import ReportPicker from '../components/ReportPicker'
 import ReportTrash from '../components/ReportTrash'
 import StorageCleanup from '../components/StorageCleanup'
+import { heading, printDocument, statGrid, table } from '../lib/print'
 import {
   LOCALE,
   SHIFTS,
@@ -28,6 +31,7 @@ import {
   formatDate,
   formatMoney,
   parseDateInput,
+  shiftRank,
   todayISO,
 } from '../lib/utils'
 
@@ -57,6 +61,7 @@ export default function AdminDashboard() {
 
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   useEffect(() => {
     supabase
@@ -122,13 +127,17 @@ export default function AdminDashboard() {
     )
   }, [reports])
 
-  /** Grupisanje po datumu za pregledniju listu. */
+  /**
+   * Grupisanje po datumu za pregledniju listu.
+   * Unutar dana smene idu redom kako se rade: prva, međusmena, druga.
+   */
   const byDate = useMemo(() => {
     const map = new Map()
     for (const r of reports) {
       if (!map.has(r.report_date)) map.set(r.report_date, [])
       map.get(r.report_date).push(r)
     }
+    for (const list of map.values()) list.sort((a, b) => shiftRank(a.shift) - shiftRank(b.shift))
     return Array.from(map.entries())
   }, [reports])
 
@@ -192,6 +201,129 @@ export default function AdminDashboard() {
     URL.revokeObjectURL(url)
   }
 
+  /** Isti spisak, samo uredan za štampu ili PDF — `parts` bira šta ulazi. */
+  function printReports(parts) {
+    const has = (key) => parts.includes(key)
+
+    const columns = [
+      { label: 'Datum', width: '13%' },
+      { label: 'Smena', width: '15%' },
+      { label: 'Radnik' },
+      { label: 'Status', width: '15%' },
+      { label: 'Pazar', align: 'right', width: '13%' },
+      { label: 'Kartice', align: 'right', width: '13%' },
+      { label: 'Predato', align: 'right', width: '13%' },
+    ]
+
+    const rows = []
+    for (const [date, dayReports] of byDate) {
+      const dayTotal = dayReports.reduce((s, r) => s + Number(r.total_amount ?? 0), 0)
+      rows.push({
+        kind: 'group',
+        label: new Intl.DateTimeFormat(LOCALE, {
+          weekday: 'long',
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        }).format(new Date(`${date}T00:00:00`)),
+        right: formatMoney(dayTotal, false),
+      })
+      for (const r of dayReports) {
+        rows.push([
+          formatDate(r.report_date),
+          SHIFT_LABELS[r.shift] ?? r.shift,
+          r.created_by_name ?? '—',
+          STATUS_LABELS[r.status] ?? r.status,
+          formatMoney(r.total_amount, false),
+          formatMoney(r.card_amount, false),
+          formatMoney(r.cash_amount, false),
+        ])
+      }
+    }
+    rows.push({
+      kind: 'total',
+      cells: [
+        'Ukupno',
+        '',
+        `${reports.length} ${reports.length === 1 ? 'izveštaj' : 'izveštaja'}`,
+        '',
+        formatMoney(totals.total, false),
+        formatMoney(totals.card, false),
+        formatMoney(totals.cash, false),
+      ],
+    })
+
+    /* Pazar po danima — isti period, samo sabran po danu. */
+    const dayColumns = [
+      { label: 'Datum', width: '16%' },
+      { label: 'Dan' },
+      { label: 'Smena', align: 'right', width: '10%' },
+      { label: 'Pazar', align: 'right', width: '15%' },
+      { label: 'Kartice', align: 'right', width: '15%' },
+      { label: 'Predato', align: 'right', width: '15%' },
+    ]
+
+    const dayRows = byDate.map(([date, dayReports]) => {
+      const sum = dayReports.reduce(
+        (acc, r) => ({
+          total: acc.total + Number(r.total_amount ?? 0),
+          card: acc.card + Number(r.card_amount ?? 0),
+          cash: acc.cash + Number(r.cash_amount ?? 0),
+        }),
+        { total: 0, card: 0, cash: 0 },
+      )
+      return [
+        formatDate(date),
+        new Intl.DateTimeFormat(LOCALE, { weekday: 'long' }).format(new Date(`${date}T00:00:00`)),
+        String(dayReports.length),
+        formatMoney(sum.total, false),
+        formatMoney(sum.card, false),
+        formatMoney(sum.cash, false),
+      ]
+    })
+
+    if (dayRows.length > 0) {
+      dayRows.push({
+        kind: 'total',
+        cells: [
+          'Ukupno',
+          `${byDate.length} ${byDate.length === 1 ? 'dan' : 'dana'}`,
+          String(reports.length),
+          formatMoney(totals.total, false),
+          formatMoney(totals.card, false),
+          formatMoney(totals.cash, false),
+        ],
+      })
+    }
+
+    printDocument({
+      title: 'Izveštaji smena',
+      subtitle: filterSummary,
+      meta: [
+        { label: 'Period', value: `${formatDate(rangeFrom)} – ${formatDate(rangeTo)}` },
+        { label: 'Izveštaja', value: String(reports.length) },
+      ],
+      content: [
+        has('zbir')
+          ? statGrid([
+              { label: 'Pazar', value: formatMoney(totals.total, false), sub: 'RSD' },
+              { label: 'Kartice', value: formatMoney(totals.card, false), sub: 'RSD' },
+              { label: 'Predato', value: formatMoney(totals.cash, false), sub: 'RSD' },
+              { label: 'Čeka potvrdu', value: String(totals.pending), sub: `od ${reports.length}` },
+            ])
+          : '',
+        has('dani') ? heading('Pazar po danima') : '',
+        has('dani')
+          ? table({ columns: dayColumns, rows: dayRows, empty: 'Za izabrani period nema pazara.' })
+          : '',
+        has('smene') ? heading('Smene pojedinačno') : '',
+        has('smene')
+          ? table({ columns, rows, empty: 'Za izabrani period nema poslatih popisa.' })
+          : '',
+      ].join(''),
+    })
+  }
+
   return (
     <div className="space-y-4">
       {/* ---------- Filteri (padajući meni, zatvoren po defaultu) ---------- */}
@@ -202,12 +334,12 @@ export default function AdminDashboard() {
           aria-expanded={filtersOpen}
           className={cx(
             'flex w-full items-center gap-3 px-4 py-3.5 text-left transition',
-            filtersOpen ? 'bg-slate-50' : 'hover:bg-slate-50',
+            filtersOpen ? 'bg-stone-50' : 'hover:bg-stone-50',
           )}
         >
           <svg
             className={cx(
-              'h-4 w-4 shrink-0 text-slate-400 transition-transform',
+              'h-4 w-4 shrink-0 text-stone-400 transition-transform',
               filtersOpen && 'rotate-90',
             )}
             viewBox="0 0 24 24"
@@ -222,8 +354,8 @@ export default function AdminDashboard() {
           </svg>
 
           <div className="min-w-0 flex-1">
-            <p className="text-base font-bold text-slate-900">Filteri</p>
-            <p className="truncate text-sm text-slate-500">{filterSummary}</p>
+            <p className="text-base font-bold text-stone-900">Filteri</p>
+            <p className="truncate text-sm text-stone-500">{filterSummary}</p>
           </div>
 
           {extraCount > 0 && (
@@ -234,7 +366,7 @@ export default function AdminDashboard() {
         </button>
 
         {filtersOpen && (
-          <div className="space-y-3 border-t border-slate-200 p-4">
+          <div className="space-y-3 border-t border-stone-200 p-4">
             <div className="flex flex-wrap gap-2">
               {QUICK_RANGES.map((range) => {
                 const active = from === range.from() && to === range.to()
@@ -247,7 +379,7 @@ export default function AdminDashboard() {
                       'rounded-full px-3.5 py-1.5 text-sm font-semibold transition ring-1 ring-inset',
                       active
                         ? 'bg-ink text-white ring-ink'
-                        : 'bg-white text-slate-700 ring-slate-300 hover:bg-slate-50',
+                        : 'bg-white text-stone-700 ring-stone-300 hover:bg-stone-50',
                     )}
                   >
                     {range.label}
@@ -256,30 +388,20 @@ export default function AdminDashboard() {
               })}
             </div>
 
-            {/* Proizvoljan period */}
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Ili izaberi tačan period
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Od">
-                  <Input
-                    type="date"
-                    value={from}
-                    max={to}
-                    onChange={(e) => setFrom(e.target.value)}
-                  />
-                </Field>
-                <Field label="Do">
-                  <Input
-                    type="date"
-                    value={to}
-                    min={from}
-                    max={todayISO()}
-                    onChange={(e) => setTo(e.target.value)}
-                  />
-                </Field>
-              </div>
+            {/* Proizvoljan period — polja govore sama za sebe, bez naslova. */}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Od">
+                <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+              </Field>
+              <Field label="Do">
+                <Input
+                  type="date"
+                  value={to}
+                  min={from}
+                  max={todayISO()}
+                  onChange={(e) => setTo(e.target.value)}
+                />
+              </Field>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
@@ -319,7 +441,7 @@ export default function AdminDashboard() {
               </Button>
               {extraCount > 0 && (
                 <Button variant="ghost" size="sm" onClick={resetFilters}>
-                  Poništi filtere
+                  Poništi
                 </Button>
               )}
             </div>
@@ -328,13 +450,14 @@ export default function AdminDashboard() {
       </Card>
 
       {/* ---------- Zbirni podaci ---------- */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {/* Redosled svuda isti: pazar, kartice, predato. */}
-        <Stat label="Pazar" value={formatMoney(totals.total, false)} tone="total" sub="RSD" />
-        <Stat label="Kartice" value={formatMoney(totals.card, false)} tone="card" sub="RSD" />
-        <Stat label="Predato" value={formatMoney(totals.cash, false)} tone="cash" sub="RSD" />
-        <Stat label="Čeka potvrdu" value={totals.pending} sub={`od ${reports.length} izveštaja`} />
-      </div>
+      {/* Redosled svuda isti: pazar, kartice, predato. Dinari se ne pišu — svi
+          iznosi u aplikaciji su u dinarima. */}
+      <StatRow className="grid-cols-2 sm:grid-cols-4">
+        <Stat label="Pazar" value={formatMoney(totals.total, false)} tone="total" />
+        <Stat label="Kartice" value={formatMoney(totals.card, false)} />
+        <Stat label="Predato" value={formatMoney(totals.cash, false)} />
+        <Stat label="Čeka" value={totals.pending} sub={`od ${reports.length}`} />
+      </StatRow>
 
       {/* ---------- Lista izveštaja ---------- */}
       <Card>
@@ -344,29 +467,39 @@ export default function AdminDashboard() {
             loading
               ? 'Učitavanje…'
               : dateSearch
-                ? `Pretraga: ${
-                    dateSearch.from === dateSearch.to
-                      ? formatDate(dateSearch.from)
-                      : `${formatDate(dateSearch.from)} – ${formatDate(dateSearch.to)}`
-                  } · ${reports.length} rezultata`
-                : `${reports.length} rezultata`
+                ? dateSearch.from === dateSearch.to
+                  ? formatDate(dateSearch.from)
+                  : `${formatDate(dateSearch.from)} – ${formatDate(dateSearch.to)}`
+                : `${reports.length}`
           }
           action={
             <div className="flex shrink-0 items-center gap-1">
               {reports.length > 0 && (
-                <Button variant="secondary" size="sm" onClick={exportCsv}>
-                  ⬇ CSV
-                </Button>
+                <>
+                  <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
+                    Preuzmi
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={exportCsv}>
+                    CSV
+                  </Button>
+                </>
               )}
-              <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
-                ↻ Osveži
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={load}
+                disabled={loading}
+                aria-label="Osveži"
+                title="Osveži"
+              >
+                ↻
               </Button>
             </div>
           }
         />
 
         {/* Pretraga po datumu — traži kroz celu istoriju, bez obzira na filter */}
-        <div className="border-b border-slate-200 p-4">
+        <div className="border-b border-stone-100 p-4">
           <div className="relative">
             <Input
               type="search"
@@ -381,7 +514,7 @@ export default function AdminDashboard() {
               <button
                 type="button"
                 onClick={() => setSearch('')}
-                className="absolute inset-y-0 right-3 text-lg text-slate-400 transition hover:text-slate-700"
+                className="absolute inset-y-0 right-3 text-lg text-stone-400 transition hover:text-stone-700"
                 aria-label="Obriši pretragu"
               >
                 ×
@@ -389,9 +522,8 @@ export default function AdminDashboard() {
             )}
           </div>
           {searchInvalid && (
-            <p className="mt-1.5 text-xs font-medium text-rose-600">
-              Nije prepoznat datum. Probaj <strong>15</strong>, <strong>15.09</strong>,{' '}
-              <strong>15.09.2026</strong> ili <strong>09.2026</strong> za ceo mesec.
+            <p className="mt-1.5 text-[12px] font-medium text-rose-600">
+              Probaj 15 · 15.09 · 15.09.2026 · 09.2026
             </p>
           )}
         </div>
@@ -404,11 +536,7 @@ export default function AdminDashboard() {
           <EmptyState
             icon="🗂️"
             title="Nema izveštaja"
-            description={
-              dateSearch
-                ? 'Za traženi datum nema poslatih popisa.'
-                : 'Za izabrani period i filtere nema poslatih popisa. Otvori Filtere gore da proširiš period.'
-            }
+            description={dateSearch ? undefined : 'Proširi period u Filterima.'}
           />
         ) : (
           <div>
@@ -416,20 +544,19 @@ export default function AdminDashboard() {
               const dayTotal = dayReports.reduce((s, r) => s + Number(r.total_amount ?? 0), 0)
               return (
                 <div key={date}>
-                  <div className="flex items-center justify-between bg-slate-50 px-4 py-2">
-                    <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <div className="flex items-center justify-between border-b border-stone-100 px-4 pb-1.5 pt-4">
+                    <span className="eyebrow">
                       {new Intl.DateTimeFormat(LOCALE, {
                         weekday: 'long',
                         day: '2-digit',
                         month: '2-digit',
-                        year: 'numeric',
                       }).format(new Date(`${date}T00:00:00`))}
                     </span>
-                    <span className="text-xs font-bold tabular-nums text-slate-600">
-                      {formatMoney(dayTotal)}
+                    <span className="text-[12px] font-bold tabular-nums text-stone-500">
+                      {formatMoney(dayTotal, false)}
                     </span>
                   </div>
-                  <div className="divide-y divide-slate-100">
+                  <div className="divide-y divide-stone-100">
                     {dayReports.map((report) => (
                       <ReportListItem key={report.id} report={report} showAuthor />
                     ))}
@@ -440,6 +567,19 @@ export default function AdminDashboard() {
           </div>
         )}
       </Card>
+
+      {/* Šta ulazi u preuzet izveštaj */}
+      <ReportPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Preuzmi izveštaje smena"
+        options={[
+          { key: 'zbir', label: 'Zbirni pregled' },
+          { key: 'dani', label: 'Pazar po danima' },
+          { key: 'smene', label: 'Smene pojedinačno' },
+        ]}
+        onConfirm={printReports}
+      />
 
       {/* Održavanje prostora — da besplatnih 1 GB nikad ne popuniš */}
       {/* Obrisani popisi — 12 sati mogu da se vrate */}

@@ -68,6 +68,26 @@ create table if not exists public.profiles (
 
 comment on table public.profiles is 'Radnici i vlasnici. Red se kreira automatski kad se napravi auth korisnik.';
 
+-- Način plaćanja: dnevnica po smeni ili mesečna plata, uz opcioni procenat
+-- od pazara smena koje je radnik radio.
+alter table public.profiles add column if not exists pay_model text not null default 'dnevnica';
+alter table public.profiles add column if not exists monthly_salary numeric(10,2) not null default 0;
+alter table public.profiles add column if not exists percent numeric(5,2) not null default 0;
+
+do $$
+begin
+  alter table public.profiles add constraint profiles_pay_model_check
+    check (pay_model in ('dnevnica', 'plata'));
+exception when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.profiles add constraint profiles_percent_check
+    check (percent >= 0 and percent <= 100);
+exception when duplicate_object then null;
+end $$;
+
 -- Migracije za baze napravljene ranijom verzijom skripta
 alter table public.profiles add column if not exists daily_wage numeric(10,2) not null default 0;
 alter table public.profiles add column if not exists is_deleted boolean not null default false;
@@ -158,11 +178,16 @@ create index if not exists shift_reports_creator_idx on public.shift_reports (cr
 create index if not exists shift_reports_status_idx  on public.shift_reports (status);
 
 -- 2.4 Ko je radio u smeni (više radnika po smeni)
+--     `wage_override` — umanjena dnevnica baš za taj dan (NULL = puna).
 create table if not exists public.shift_report_staff (
   report_id  uuid not null references public.shift_reports (id) on delete cascade,
   profile_id uuid not null references public.profiles (id)      on delete cascade,
+  wage_override numeric(10,2) check (wage_override is null or wage_override >= 0),
   primary key (report_id, profile_id)
 );
+
+alter table public.shift_report_staff
+  add column if not exists wage_override numeric(10,2);
 
 create index if not exists shift_report_staff_profile_idx on public.shift_report_staff (profile_id);
 
@@ -349,12 +374,19 @@ security definer
 set search_path = public
 as $$
 begin
+  -- Uloga je UVEK „radnik“. Ranije se čitala iz podataka koje šalje onaj ko
+  -- pravi nalog — pa je bilo ko mogao sam sebi da otvori nalog vlasnika.
+  -- Ulogu vlasnika dodeljuje samo vlasnik (ekran Radnici ili SQL Editor).
   insert into public.profiles (id, email, full_name, role)
   values (
     new.id,
     new.email,
-    coalesce(nullif(new.raw_user_meta_data ->> 'full_name', ''), split_part(new.email, '@', 1)),
-    coalesce((new.raw_user_meta_data ->> 'role')::public.user_role, 'radnik')
+    coalesce(
+      nullif(new.raw_user_meta_data ->> 'full_name', ''),
+      nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
+      'Novi radnik'
+    ),
+    'radnik'
   )
   on conflict (id) do nothing;
   return new;
@@ -465,7 +497,12 @@ begin
     new.role       := old.role;
     new.is_active  := old.is_active;
     new.is_deleted := old.is_deleted;
-    new.daily_wage := old.daily_wage;   -- radnik ne menja sebi dnevnicu
+    new.daily_wage     := old.daily_wage;      -- radnik ne menja sebi zaradu
+    new.pay_model      := old.pay_model;
+    new.monthly_salary := old.monthly_salary;
+    new.percent        := old.percent;
+    new.full_name      := old.full_name;       -- po imenu se prijavljuje — menja ga samo vlasnik
+    new.email          := old.email;
 
     -- Slika profila sme da pokazuje samo na fajl u SVOM folderu (avatari/<id>/…).
     if new.avatar_path is not null
@@ -683,6 +720,66 @@ create trigger shift_reports_stamp_verification
   before update on public.shift_reports
   for each row execute function public.stamp_verification();
 
+-- 3.9 Šta radnik sme da menja na popisu.
+--     Pazar, kartice, napomenu i dnevnu obavezu — da. Datum, smenu, potvrdu i
+--     poruku vlasnika — ne. Status sme samo da postavi na „poslat“ (zatvori
+--     smenu ili pošalje ispravku); potvrđuje i vraća samo vlasnik.
+--     Okidači idu po abecedi — `…_guard_update` radi PRE `…_stamp_verification`.
+create or replace function public.guard_report_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is not null and not public.is_admin() then
+    new.id            := old.id;
+    new.report_date   := old.report_date;
+    new.shift         := old.shift;
+    new.created_by    := old.created_by;
+    new.created_at    := old.created_at;
+    new.verified_by   := old.verified_by;
+    new.verified_at   := old.verified_at;
+    new.admin_note    := old.admin_note;
+    new.admin_note_by := old.admin_note_by;
+    new.admin_note_at := old.admin_note_at;
+
+    if new.status is distinct from old.status and new.status <> 'poslat' then
+      new.status := old.status;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists shift_reports_guard_update on public.shift_reports;
+create trigger shift_reports_guard_update
+  before update on public.shift_reports
+  for each row execute function public.guard_report_update();
+
+-- 3.10 Prijava po imenu.
+--      Radnik kuca „Marko Marković“, a Supabase traži mejl. Ova funkcija
+--      nađe mejl tog naloga — i kad ga je vlasnik u međuvremenu preimenovao.
+--      Vraća samo mejl (nikakve druge podatke) i samo za RADNIKE — pravi mejl
+--      vlasnika se ne otkriva nikome ko otkuca njegovo ime. Vlasnik se
+--      prijavljuje svojim mejlom.
+create or replace function public.login_email(p_name text)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.email
+  from public.profiles p
+  where lower(p.full_name) = lower(regexp_replace(btrim(coalesce(p_name, '')), '\s+', ' ', 'g'))
+    and p.role = 'radnik'
+    and not p.is_deleted
+    and p.email is not null
+  order by p.is_active desc
+  limit 1;
+$$;
+
 
 -- ---------------------------------------------------------------------
 -- 4. ROW LEVEL SECURITY
@@ -773,12 +870,14 @@ create policy "reports_insert_self"
   to authenticated
   with check (
     created_by = auth.uid()
+    and status = 'otvoren'          -- radnik može samo da OTVORI smenu, ne i da je „pošalje“
     and exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_active)
   );
 
 -- Izveštaj menja SVAKO KO JE U SMENI dok smena traje ili je vraćena na
--- ispravku; admin menja sve. Radnik sme da ga ostavi otvorenim ili da ga
--- zatvori (poslat) — potvrdu upisuje samo vlasnik.
+-- ispravku; admin menja sve. Status `vracen` mora da prođe proveru — inače
+-- se ispravke pazara/napomene na vraćenom popisu tiho ne bi sačuvale.
+-- Šta tačno radnik sme da promeni određuje okidač `guard_report_update`.
 drop policy if exists "reports_update_own_unverified_or_admin" on public.shift_reports;
 create policy "reports_update_own_unverified_or_admin"
   on public.shift_reports for update
@@ -789,7 +888,7 @@ create policy "reports_update_own_unverified_or_admin"
   )
   with check (
     public.is_admin()
-    or (public.report_is_editable(id) and status in ('otvoren', 'poslat'))
+    or (public.report_is_editable(id) and status in ('otvoren', 'vracen', 'poslat'))
   );
 
 drop policy if exists "reports_delete_admin" on public.shift_reports;
@@ -817,14 +916,31 @@ create policy "staff_insert"
     or (public.report_is_editable(report_id) and profile_id = auth.uid())
   );
 
+-- Radnik sme da izađe iz smene SAMO dok traje. Iz vraćenog popisa ne sme —
+-- posle toga ne bi mogao nazad, a izgubio bi dnevnicu za tu smenu.
 drop policy if exists "staff_delete" on public.shift_report_staff;
 create policy "staff_delete"
   on public.shift_report_staff for delete
   to authenticated
   using (
     public.is_admin()
-    or (public.report_is_editable(report_id) and profile_id = auth.uid())
+    or (
+      profile_id = auth.uid()
+      and exists (
+        select 1 from public.shift_reports r
+        where r.id = report_id and r.status = 'otvoren'
+      )
+    )
   );
+
+-- Umanjenu dnevnicu za pojedini dan upisuje SAMO admin. Radnik sme da uđe u
+-- smenu i da izađe iz nje, ali iznos ne sme da dira.
+drop policy if exists "staff_update" on public.shift_report_staff;
+create policy "staff_update"
+  on public.shift_report_staff for update
+  to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
 
 -- ===================== 4.5 SHIFT_REPORT_ITEMS =====================
 drop policy if exists "report_items_select" on public.shift_report_items;
@@ -958,11 +1074,23 @@ create policy "izvestaji_update_owner_or_admin"
   using (bucket_id = 'izvestaji' and (owner = auth.uid() or public.is_admin()))
   with check (bucket_id = 'izvestaji' and (owner = auth.uid() or public.is_admin()));
 
+-- Sliku može da obriše i kolega iz iste smene dok se popis još menja
+-- (putanja je <id popisa>/…) — inače bi fajl ostao zauvek u storage-u.
 drop policy if exists "izvestaji_delete_owner_or_admin" on storage.objects;
 create policy "izvestaji_delete_owner_or_admin"
   on storage.objects for delete
   to authenticated
-  using (bucket_id = 'izvestaji' and (owner = auth.uid() or public.is_admin()));
+  using (
+    bucket_id = 'izvestaji'
+    and (
+      owner = auth.uid()
+      or public.is_admin()
+      or (
+        (storage.foldername(name))[1] ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        and public.report_is_editable(((storage.foldername(name))[1])::uuid)
+      )
+    )
+  );
 
 -- 5.1 Slike profila
 --     Svaki radnik ima svoj folder: avatari/<id radnika>/<vreme>.jpg
@@ -1040,7 +1168,9 @@ select
   r.created_by,
   p.full_name as created_by_name,
   (select count(*) from public.report_images i where i.report_id = r.id)      as image_count,
-  (select count(*) from public.shift_report_items si where si.report_id = r.id) as item_count
+  (select count(*) from public.shift_report_items si where si.report_id = r.id) as item_count,
+  -- Svi koji su radili smenu — da filter „radnik“ nađe i smene koje nije on otvorio.
+  array(select s.profile_id from public.shift_report_staff s where s.report_id = r.id) as staff_ids
 from public.shift_reports r
 join public.profiles p on p.id = r.created_by;
 
@@ -1231,7 +1361,9 @@ grant execute on function public.can_access_report(uuid)   to authenticated;
 grant execute on function public.report_is_editable(uuid)  to authenticated;
 grant execute on function public.rename_category(uuid, text) to authenticated;
 grant execute on function public.open_or_join_shift(date, public.shift_type) to authenticated;
+revoke execute on function public.peek_shift(date, public.shift_type) from public, anon;
 grant execute on function public.peek_shift(date, public.shift_type) to authenticated;
+grant execute on function public.login_email(text)        to anon, authenticated;
 grant execute on function public.item_sales(date, date) to authenticated;
 grant execute on function public.trash_report(uuid)      to authenticated;
 grant execute on function public.restore_report(uuid)    to authenticated;
@@ -1281,6 +1413,11 @@ update public.items
 set category = 'Monin — kafa'
 where category = 'Monin — kafa i deserti';
 
+-- Početni spisak kategorija ide SAMO u praznu bazu — ponovno pokretanje
+-- skripta ne sme da vrati kategoriju koju je vlasnik obrisao ili preimenovao.
+do $seed$
+begin
+if not exists (select 1 from public.categories) then
 insert into public.categories (name, sort_order) values
   ('Kafa',                   100),
   ('Čaj',                    200),
@@ -1303,6 +1440,8 @@ insert into public.categories (name, sort_order) values
   ('Gelato',                1900),
   ('Ostalo',                2000)
 on conflict do nothing;
+end if;
+end $seed$;
 
 -- Ako u bazi već postoje artikli sa kategorijom koje nema u tabeli
 -- (napravljeni ranijom verzijom, kad je kategorija bila slobodan tekst),
@@ -1321,6 +1460,11 @@ on conflict do nothing;
 --    Prepisano sa popisnih listi, razvrstano po kategorijama.
 --    Redosled (sort_order) prati redosled u popisu; menja se kroz app.
 -- ---------------------------------------------------------------------
+-- Početni spisak artikala ide SAMO u praznu bazu — ponovno pokretanje
+-- skripta ne sme da vrati artikal koji je vlasnik obrisao ili preimenovao.
+do $seed$
+begin
+if not exists (select 1 from public.items) then
 insert into public.items (name, category, unit, sort_order) values
   -- Kafa
   ('Espresso',                      'Kafa',                   'kom',   110),
@@ -1464,6 +1608,8 @@ insert into public.items (name, category, unit, sort_order) values
   -- Ostalo
   ('Stikeri',                       'Ostalo',                 'kom',   2210)
 on conflict do nothing;
+end if;
+end $seed$;
 
 -- ---------------------------------------------------------------------
 -- 10. PRAVILA I OBAVEZE — Bistro de Balzac
@@ -1584,12 +1730,6 @@ set body = regexp_replace(body, '^([12])\. (?!smena)', '\1. smena: ', 'gn')
 where title = 'Dnevne obaveze'
   and body ~ '(^|\n)[12]\. (?!smena)';
 
--- Ispravke kategorija za baze napunjene ranijom verzijom skripta.
--- (Gornji INSERT preskače postojeće artikle, pa se izmene rade ovde.)
-update public.items
-set category = 'Voda', sort_order = 630
-where lower(name) = 'limunska trava';
-
 
 -- =====================================================================
 --  GOTOVO.
@@ -1603,7 +1743,12 @@ where lower(name) = 'limunska trava';
 --       set role = 'admin', full_name = 'Nikola Ivković'
 --       where email = 'tvoj-email@primer.com';
 --
---  U aplikaciju se prijavljuješ PUNIM IMENOM (ili emailom — oba rade za
---  naloge napravljene ovde). Radnici koje kasnije otvoriš kroz aplikaciju
---  prijavljuju se isključivo punim imenom i lozinkom koju im ti zadaš.
+--  U aplikaciju se prijavljuješ emailom ili punim imenom (ime se preko
+--  funkcije `login_email` pretvara u adresu naloga). Radnici koje kasnije
+--  otvoriš kroz aplikaciju prijavljuju se punim imenom i lozinkom koju im
+--  ti zadaš.
+--
+--  BEZBEDNOST: u Supabase-u isključi javnu registraciju —
+--  Authentication -> Sign In / Providers -> „Allow new users to sign up“ OFF.
+--  Naloge otvaraš samo ti (panel ili ekran Radnici).
 -- =====================================================================

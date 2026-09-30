@@ -14,13 +14,19 @@ import MyEarnings from './MyEarnings'
 export default function Profile() {
   const { profile, isAdmin, refreshProfile } = useAuth()
 
+  const naPlati = profile?.pay_model === 'plata'
+  const procenat = Number(profile?.percent ?? 0)
+
   const rows = [
     ['Ime i prezime', profile?.full_name || '—'],
     ['Broj telefona', profile?.phone || '—'],
-    ['Uloga', isAdmin ? 'Vlasnik' : 'Radnik'],
-    ['Dnevnica', formatMoney(profile?.daily_wage)],
+    ['Uloga', isAdmin ? 'Admin' : 'Radnik'],
+    naPlati
+      ? ['Plata', `${formatMoney(profile?.monthly_salary)} mesečno`]
+      : ['Dnevnica', formatMoney(profile?.daily_wage)],
+    procenat > 0 ? ['Procenat od pazara', `${procenat}%`] : null,
     ['U timu od', profile?.created_at ? formatDate(profile.created_at.slice(0, 10)) : '—'],
-  ]
+  ].filter(Boolean)
 
   return (
     <div className="space-y-4">
@@ -36,7 +42,7 @@ export default function Profile() {
               <h1 className="truncate text-lg font-bold tracking-tight text-stone-900">
                 {profile.full_name}
               </h1>
-              <p className="text-sm text-stone-500">{isAdmin ? 'Vlasnik' : 'Radnik'}</p>
+              <p className="text-sm text-stone-500">{isAdmin ? 'Admin' : 'Radnik'}</p>
             </AvatarEditor>
           )}
         </div>

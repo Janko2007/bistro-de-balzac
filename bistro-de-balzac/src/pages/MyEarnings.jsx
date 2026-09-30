@@ -55,7 +55,7 @@ export default function MyEarnings() {
     <div className="space-y-4">
       <Card>
         <CardHeader
-          title="Dnevnice"
+          title={calc.model === 'plata' ? 'Plata' : 'Dnevnice'}
           subtitle={isOpenPeriod(period) ? 'Period je još u toku' : 'Zatvoren period'}
           action={<PeriodPicker period={period} onChange={setPeriod} />}
           // Na uskom telefonu meni prelazi ispod naslova umesto da ga skrati.
@@ -67,19 +67,36 @@ export default function MyEarnings() {
         ) : (
           <>
             <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-4">
-              <Stat label="Odrađeno smena" value={calc.shifts} sub={`× ${formatMoney(calc.wage, false)}`} />
-              <Stat label="Zarađeno" value={formatMoney(calc.earned, false)} sub="RSD" />
-              <Stat
-                label="Bonus"
-                value={formatMoney(calc.bonus, false)}
-                sub="RSD na platu"
-                tone="cash"
-              />
-              <Stat label="Isplaćeno" value={formatMoney(calc.paid, false)} sub="RSD" />
+              {calc.model === 'plata' ? (
+                <Stat label="Plata" value={formatMoney(calc.base, false)} sub="pola meseca" />
+              ) : (
+                /* Dana, a ne smena — međusmena u dve smene istog dana je
+                   jedna dnevnica. */
+                <Stat
+                  label="Odrađeno dana"
+                  value={calc.days}
+                  sub={
+                    calc.reduced > 0
+                      ? `${calc.reduced} umanjeno`
+                      : `× ${formatMoney(calc.wage, false)}`
+                  }
+                />
+              )}
+              {calc.fromPercent > 0 ? (
+                <Stat
+                  label="Procenat"
+                  value={formatMoney(calc.fromPercent, false)}
+                  sub={`${calc.percent}% od pazara`}
+                />
+              ) : (
+                <Stat label="Zarađeno" value={formatMoney(calc.earned, false)} />
+              )}
+              <Stat label="Bonus" value={formatMoney(calc.bonus, false)} />
+              <Stat label="Isplaćeno" value={formatMoney(calc.paid, false)} />
             </div>
 
             <div className="mx-4 mb-4 flex items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3.5 text-white">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
+              <p className="eyebrow">
                 Imaš da primiš
               </p>
               <p className="text-2xl font-extrabold tabular-nums">{formatMoney(calc.balance)}</p>
@@ -105,34 +122,48 @@ export default function MyEarnings() {
       <Card>
         <CardHeader
           title="Odrađene smene"
-          subtitle={`${countLabel(calc.shifts, 'smena')} u ovom periodu`}
+          subtitle={
+            calc.shifts > calc.days
+              ? `${calc.shifts} · ${countLabel(calc.days, 'dan')}`
+              : String(calc.shifts)
+          }
         />
         {calc.shiftList.length === 0 ? (
-          <EmptyState
-            icon="🗓️"
-            title="Nema smena u ovom periodu"
-            description="Svaka poslata smena se ovde pojavljuje i ulazi u obračun."
-          />
+          <EmptyState icon="🗓️" title="Nema smena u ovom periodu" />
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-stone-100">
             {calc.shiftList.map((s) => (
               <li key={s.id}>
                 <Link
                   to={`/izvestaj/${s.id}`}
-                  className="flex items-center gap-3 px-4 py-2.5 transition hover:bg-slate-50"
+                  className="flex items-center gap-3 px-4 py-2.5 transition hover:bg-stone-50"
                 >
-                  <span className="text-sm font-semibold text-slate-800">
+                  <span className="text-sm font-semibold text-stone-800">
                     {formatDate(s.report_date)}
                   </span>
-                  <span className="text-xs text-slate-500">{SHIFT_LABELS[s.shift] ?? s.shift}</span>
-                  <span
-                    className={cx(
-                      'ml-auto text-sm font-bold tabular-nums',
-                      s.status === 'potvrdjen' ? 'text-emerald-700' : 'text-slate-500',
-                    )}
-                  >
-                    +{formatMoney(calc.wage, false)}
-                  </span>
+                  <span className="text-xs text-stone-500">{SHIFT_LABELS[s.shift] ?? s.shift}</span>
+                  {/* Na dnevnici se uz smenu vidi i koliko nosi; na plati ne.
+                      Ako je admin za taj dan upisao umanjeni iznos, piše on. */}
+                  {calc.model === 'dnevnica' && (
+                    <span
+                      className={cx(
+                        'ml-auto text-sm font-bold tabular-nums',
+                        s.wage_override !== null && s.wage_override !== undefined
+                          ? 'text-rose-600'
+                          : s.status === 'potvrdjen'
+                            ? 'text-emerald-700'
+                            : 'text-stone-500',
+                      )}
+                    >
+                      +
+                      {formatMoney(
+                        s.wage_override !== null && s.wage_override !== undefined
+                          ? s.wage_override
+                          : calc.wage,
+                        false,
+                      )}
+                    </span>
+                  )}
                 </Link>
               </li>
             ))}
@@ -172,11 +203,11 @@ export default function MyEarnings() {
         </button>
 
         {!paysOpen ? null : calc.payouts.length === 0 ? (
-          <p className="border-t border-stone-100 px-4 py-8 text-center text-sm text-slate-500">
+          <p className="border-t border-stone-100 px-4 py-8 text-center text-sm text-stone-500">
             Još nema upisanih stavki za ovaj period.
           </p>
         ) : (
-          <ul className="divide-y divide-slate-100 border-t border-stone-100">
+          <ul className="divide-y divide-stone-100 border-t border-stone-100">
             {calc.payouts.map((p) => {
               const isBonus = p.kind === 'bonus'
               return (
@@ -185,15 +216,15 @@ export default function MyEarnings() {
                     {isBonus ? '🎁' : '💵'}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-slate-800">
+                    <p className="text-sm font-semibold text-stone-800">
                       {isBonus ? 'Bonus' : 'Isplata'} · {formatDate(p.paid_on)}
                     </p>
-                    {p.note && <p className="truncate text-xs text-slate-500">{p.note}</p>}
+                    {p.note && <p className="truncate text-xs text-stone-500">{p.note}</p>}
                   </div>
                   <span
                     className={cx(
                       'shrink-0 text-sm font-bold tabular-nums',
-                      isBonus ? 'text-emerald-700' : 'text-slate-900',
+                      isBonus ? 'text-emerald-700' : 'text-stone-900',
                     )}
                   >
                     {isBonus ? '+' : '−'}
@@ -206,7 +237,7 @@ export default function MyEarnings() {
         )}
 
         {paysOpen && (
-          <p className="border-t border-stone-100 px-4 py-3 text-xs text-slate-500">
+          <p className="border-t border-stone-100 px-4 py-3 text-xs text-stone-500">
             Dnevnicu, bonuse i isplate upisuje admin. Ako se nešto ne slaže, javi mu se.
           </p>
         )}

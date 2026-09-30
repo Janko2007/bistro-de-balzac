@@ -4,6 +4,9 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { groupByDueDate, longDay, shortDay, weekdayName } from '../lib/deposits'
+import { heading, printDocument, statGrid, table } from '../lib/print'
+import MonthPicker from '../components/MonthPicker'
+import ReportPicker from '../components/ReportPicker'
 import {
   Badge,
   Button,
@@ -25,6 +28,8 @@ import {
   errorMessage,
   formatDate,
   formatMoney,
+  monthRange,
+  parseDateInput,
   parseNumber,
   todayISO,
 } from '../lib/utils'
@@ -45,6 +50,14 @@ export default function AdminDeposits() {
   const [modal, setModal] = useState(null) // { kind, deposit? }
   const [form, setForm] = useState({})
   const [working, setWorking] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+
+  /* Istorija uplata: vidi se samo poslednja, strelica otvara još četiri, a
+     starije se dobijaju izborom meseca ili pretragom. */
+  const [depOpen, setDepOpen] = useState(false)
+  const [depSearchOpen, setDepSearchOpen] = useState(false)
+  const [depSearch, setDepSearch] = useState('')
+  const [depMonth, setDepMonth] = useState('') // '' = svi meseci
 
   /* ---------------------------------------------------------------- */
   /*  Učitavanje                                                       */
@@ -118,6 +131,54 @@ export default function AdminDeposits() {
       nextDue: groups.find((g) => !g.overdue)?.due ?? null,
     }
   }, [openDays, groups, deposits])
+
+  /* ---------------------------------------------------------------- */
+  /*  Istorija uplata — poslednje tri, ostalo na zahtev                 */
+  /* ---------------------------------------------------------------- */
+  /** Zatvoren spisak pokazuje samo poslednju uplatu, otvoren najviše pet. */
+  const DEPOSITS_CLOSED = 1
+  const DEPOSITS_SHOWN = 5
+
+  const depRange = useMemo(() => parseDateInput(depSearch), [depSearch])
+  const depSearchInvalid = depSearchOpen && depSearch.trim() !== '' && depRange === null
+
+  /* Pretraga i izbor meseca hvataju i dan uplate i dane koje je ta uplata
+     pokrila — tražiš „25.09“ bez obzira na to da li ti je to dan pazara ili
+     dan odlaska u banku. */
+  const depMatches = useCallback(
+    (dep, from, to) => {
+      const hit = (date) => date >= from && date <= to
+      return (
+        hit(String(dep.deposited_on)) ||
+        (dep.cash_deposit_days ?? []).some((day) => hit(String(day.business_date)))
+      )
+    },
+    [],
+  )
+
+  const searchingDeposits = depSearchOpen && depRange !== null
+  const monthPicked = depMonth !== ''
+
+  const foundDeposits = useMemo(() => {
+    let list = deposits
+    if (monthPicked) {
+      const { from, to } = monthRange(depMonth)
+      list = list.filter((dep) => depMatches(dep, from, to))
+    }
+    if (searchingDeposits) {
+      list = list.filter((dep) => depMatches(dep, depRange.from, depRange.to))
+    }
+    return list
+  }, [deposits, depMonth, monthPicked, searchingDeposits, depRange, depMatches])
+
+  /* Dok se traži ili je izabran mesec, vidi se sve što je nađeno — spisak je
+     tada ionako kratak. Inače stoji samo poslednja uplata, a strelica otvara
+     još četiri; dalje se ide mesecom, da istorija ne preraste ceo ekran. */
+  const filteringDeposits = searchingDeposits || monthPicked
+  const visibleDeposits = filteringDeposits
+    ? foundDeposits
+    : deposits.slice(0, depOpen ? DEPOSITS_SHOWN : DEPOSITS_CLOSED)
+  const moreDeposits = Math.min(DEPOSITS_SHOWN, deposits.length) - DEPOSITS_CLOSED
 
   const selectedTotal = useMemo(
     () => openDays.filter((d) => selected.has(d.date)).reduce((sum, d) => sum + d.cash, 0),
@@ -224,22 +285,189 @@ export default function AdminDeposits() {
     load()
   }
 
+  /* ---------------------------------------------------------------- */
+  /*  Izveštaj za štampu                                               */
+  /* ---------------------------------------------------------------- */
+  /** Šta čeka uplatu i šta je već uplaćeno — `parts` bira šta ulazi. */
+  function printDeposits(parts) {
+    const has = (key) => parts.includes(key)
+
+    const owedRows = []
+    for (const group of groups) {
+      owedRows.push({
+        kind: 'group',
+        label: `Uplata ${longDay(group.due)}${group.overdue ? ' — kasni' : ''}`,
+        right: formatMoney(group.total, false),
+      })
+      for (const day of group.days) {
+        owedRows.push([
+          formatDate(day.date),
+          weekdayName(day.date),
+          String(day.closed),
+          formatMoney(day.cash, false),
+        ])
+      }
+    }
+    if (owedRows.length > 0) {
+      owedRows.push({
+        kind: 'total',
+        cells: ['Ukupno za uplatu', '', '', formatMoney(totals.owed, false)],
+      })
+    }
+
+    const depositRows = deposits.map((d) => [
+      formatDate(d.deposited_on),
+      (d.cash_deposit_days ?? [])
+        .slice()
+        .sort((a, b) => (a.business_date < b.business_date ? -1 : 1))
+        .map((day) => shortDay(day.business_date))
+        .join(', '),
+      d.note || '',
+      { value: formatMoney(d.amount, false), align: 'right', strong: true },
+    ])
+    if (depositRows.length > 0) {
+      depositRows.push({
+        kind: 'total',
+        cells: [
+          'Ukupno uplaćeno',
+          '',
+          '',
+          formatMoney(
+            deposits.reduce((sum, d) => sum + Number(d.amount ?? 0), 0),
+            false,
+          ),
+        ],
+      })
+    }
+
+    /* Pazar po danima — koliko je ušlo i da li je taj dan uplaćen. */
+    const DAYS_ON_PAPER = 45
+    const recent = days.filter((d) => d.cash > 0 || d.card > 0).slice(0, DAYS_ON_PAPER)
+
+    const dayRows = recent.map((d) => {
+      const dep = paidDays.get(d.date)
+      return [
+        formatDate(d.date),
+        weekdayName(d.date),
+        formatMoney(d.cash + d.card, false),
+        formatMoney(d.card, false),
+        formatMoney(d.cash, false),
+        dep
+          ? { value: `uplaćeno ${formatDate(dep.deposited_on)}`, muted: true }
+          : { value: d.open > 0 ? 'smena u toku' : 'čeka uplatu', strong: d.open === 0 },
+      ]
+    })
+
+    if (dayRows.length > 0) {
+      const sum = recent.reduce(
+        (acc, d) => ({ cash: acc.cash + d.cash, card: acc.card + d.card }),
+        { cash: 0, card: 0 },
+      )
+      dayRows.push({
+        kind: 'total',
+        cells: [
+          'Ukupno',
+          `${recent.length} ${recent.length === 1 ? 'dan' : 'dana'}`,
+          formatMoney(sum.cash + sum.card, false),
+          formatMoney(sum.card, false),
+          formatMoney(sum.cash, false),
+          '',
+        ],
+      })
+    }
+
+    printDocument({
+      title: 'Uplate pazara',
+      subtitle: 'Gotovina iz zatvorenih smena — šta čeka polog, a šta je već uplaćeno',
+      meta: [
+        { label: 'Na dan', value: formatDate(todayISO()) },
+        { label: 'Period', value: `poslednjih ${WINDOW_DAYS} dana` },
+      ],
+      content: [
+        has('zbir')
+          ? statGrid([
+              { label: 'Za uplatu', value: formatMoney(totals.owed, false) },
+              {
+                label: 'Rok stigao',
+                value: formatMoney(totals.due, false),
+                sub: totals.due > 0 ? 'uplati odmah' : 'nema zaostatka',
+              },
+              {
+                label: 'Sledeća uplata',
+                value: totals.nextDue ? formatDate(totals.nextDue) : '—',
+                sub: totals.nextDue ? weekdayName(totals.nextDue) : 'sve je uplaćeno',
+              },
+              {
+                label: 'Uplaćeno ovog meseca',
+                value: formatMoney(totals.paidThisMonth, false),
+              },
+            ])
+          : '',
+        has('zauplatu')
+          ? heading(
+              'Za uplatu po danima',
+              'ponedeljkom: petak–nedelja · petkom: ponedeljak–četvrtak',
+            )
+          : '',
+        has('zauplatu')
+          ? table({
+              columns: [
+                { label: 'Datum', width: '16%' },
+                { label: 'Dan' },
+                { label: 'Smena', align: 'right', width: '12%' },
+                { label: 'Gotovina', align: 'right', width: '18%' },
+              ],
+              rows: owedRows,
+              empty: 'Sve je uplaćeno — nema dana koji čeka polog.',
+            })
+          : '',
+        has('uplaceno') ? heading('Uplaćeno', `${countLabel(deposits.length, 'uplata')}`) : '',
+        has('uplaceno')
+          ? table({
+              columns: [
+                { label: 'Datum uplate', width: '16%' },
+                { label: 'Za dane' },
+                { label: 'Napomena', width: '24%' },
+                { label: 'Iznos', align: 'right', width: '16%' },
+              ],
+              rows: depositRows,
+              empty: 'Još nema upisanih uplata.',
+            })
+          : '',
+        has('dani')
+          ? heading('Pazar po danima', `poslednjih ${DAYS_ON_PAPER} dana sa prometom`)
+          : '',
+        has('dani')
+          ? table({
+              columns: [
+                { label: 'Datum', width: '14%' },
+                { label: 'Dan', width: '14%' },
+                { label: 'Pazar', align: 'right', width: '14%' },
+                { label: 'Kartice', align: 'right', width: '14%' },
+                { label: 'Gotovina', align: 'right', width: '14%' },
+                { label: 'Uplata' },
+              ],
+              rows: dayRows,
+              empty: 'Nema dana sa prometom.',
+            })
+          : '',
+      ].join(''),
+    })
+  }
+
   if (loading) return <FullPageLoader />
 
   return (
     <div className="space-y-4">
       {/* ---------- Koliko ima da se uplati ---------- */}
       <StatRow className="grid-cols-2 sm:grid-cols-4">
+        {/* „Za uplatu“ je sve što još nije u banci; „Rok stigao“ je onaj deo
+            kojem je dan uplate već došao — to ide prvo. */}
+        <Stat label="Za uplatu" value={formatMoney(totals.owed, false)} tone="total" />
         <Stat
-          label="Za uplatu"
-          value={formatMoney(totals.owed, false)}
-          sub="RSD ukupno"
-          tone="total"
-        />
-        <Stat
-          label="Dospelo"
+          label="Rok stigao"
           value={formatMoney(totals.due, false)}
-          sub={totals.due > 0 ? 'treba uplatiti' : 'nema zaostataka'}
+          sub={totals.due > 0 ? 'uplati odmah' : 'nema zaostatka'}
           tone={totals.due > 0 ? 'expense' : 'default'}
         />
         <Stat
@@ -250,8 +478,6 @@ export default function AdminDeposits() {
         <Stat
           label="Uplaćeno ovog meseca"
           value={formatMoney(totals.paidThisMonth, false)}
-          sub="RSD"
-          tone="cash"
         />
       </StatRow>
 
@@ -267,9 +493,14 @@ export default function AdminDeposits() {
             </>
           }
           action={
-            <Button variant="ghost" size="sm" className="shrink-0" onClick={load}>
-              Osveži
-            </Button>
+            <div className="flex shrink-0 items-center gap-1">
+              <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
+                Preuzmi
+              </Button>
+              <Button variant="ghost" size="sm" onClick={load}>
+                Osveži
+              </Button>
+            </div>
           }
         />
 
@@ -304,7 +535,7 @@ export default function AdminDeposits() {
                       </Badge>
                     ) : (
                       <Badge className="bg-stone-100 text-stone-600 ring-stone-500/20">
-                        nije dospelo
+                        još ima vremena
                       </Badge>
                     )}
 
@@ -356,22 +587,92 @@ export default function AdminDeposits() {
         </div>
       )}
 
-      {/* ---------- Istorija uplata ---------- */}
+      {/* Šta ulazi u preuzet izveštaj */}
+      <ReportPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Preuzmi izveštaj o uplatama"
+        options={[
+          { key: 'zbir', label: 'Zbirni pregled' },
+          { key: 'zauplatu', label: 'Za uplatu po danima' },
+          { key: 'uplaceno', label: 'Uplaćeno' },
+          { key: 'dani', label: 'Pazar po danima' },
+        ]}
+        onConfirm={printDeposits}
+      />
+
+      {/* ---------- Istorija uplata ----------
+          Vide se poslednje tri. Ostalo se otvara strelicom na dnu ili se
+          traži lupom po datumu — spisak inače preraste ceo ekran. */}
       <Card>
         <CardHeader
           title="Uplaćeno"
-          subtitle={`Poslednjih ${WINDOW_DAYS} dana · ${countLabel(deposits.length, 'uplata')}`}
+          subtitle={filteringDeposits ? String(foundDeposits.length) : String(deposits.length)}
+          action={
+            deposits.length > 0 ? (
+              <div className="flex shrink-0 items-center gap-1">
+                {/* Strelica bira mesec, lupa traži po datumu. */}
+                <MonthPicker compact allowClear month={depMonth} onChange={setDepMonth} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDepSearchOpen((v) => !v)
+                    setDepSearch('')
+                  }}
+                  aria-label="Pretraga po datumu"
+                  aria-pressed={depSearchOpen}
+                  className={cx(
+                    'rounded-xl p-2 transition',
+                    depSearchOpen
+                      ? 'bg-stone-900 text-white'
+                      : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700',
+                  )}
+                >
+                  <svg
+                    className="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M20 20l-3.5-3.5" />
+                  </svg>
+                </button>
+              </div>
+            ) : null
+          }
         />
 
+        {depSearchOpen && deposits.length > 0 && (
+          <div className="px-4 pb-1 pt-3">
+            <Input
+              type="search"
+              inputMode="numeric"
+              autoFocus
+              value={depSearch}
+              onChange={(e) => setDepSearch(e.target.value)}
+              placeholder="Pretraži po datumu"
+              aria-label="Pretraga uplata po datumu"
+              className={cx(depSearchInvalid && 'border-rose-400')}
+            />
+            {depSearchInvalid && (
+              <p className="mt-1.5 text-[12px] font-medium text-rose-600">
+                Probaj 15 · 15.09 · 15.09.2026 · 09.2026
+              </p>
+            )}
+          </div>
+        )}
+
         {deposits.length === 0 ? (
-          <EmptyState
-            icon="↓"
-            title="Još nema upisanih uplata"
-            description="Označi dane gore i klikni „Upiši uplatu“."
-          />
+          <EmptyState icon="↓" title="Još nema upisanih uplata" />
+        ) : visibleDeposits.length === 0 ? (
+          <EmptyState icon="🔍" title="Nema uplate za taj period" />
         ) : (
           <ul className="divide-y divide-stone-100">
-            {deposits.map((deposit) => (
+            {visibleDeposits.map((deposit) => (
               <li key={deposit.id} className="px-4 py-3">
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
@@ -416,6 +717,31 @@ export default function AdminDeposits() {
               </li>
             ))}
           </ul>
+        )}
+
+        {/* Strelica otvara još četiri uplate. Dalje od toga se ne ide spiskom
+            — starije se uzimaju mesecom ili lupom. */}
+        {!filteringDeposits && moreDeposits > 0 && (
+          <button
+            type="button"
+            onClick={() => setDepOpen((v) => !v)}
+            aria-expanded={depOpen}
+            className="flex w-full items-center justify-center gap-2 border-t border-stone-100 px-4 py-3 text-[13px] font-semibold text-stone-500 transition hover:bg-stone-50"
+          >
+            <svg
+              className={cx('h-4 w-4 transition-transform', depOpen && 'rotate-180')}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+            {depOpen ? 'Prikaži manje' : `Još ${moreDeposits}`}
+          </button>
         )}
       </Card>
 

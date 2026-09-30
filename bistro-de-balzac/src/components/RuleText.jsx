@@ -3,7 +3,7 @@ import { LOCALE } from '../lib/utils'
 /**
  * Prikaz teksta pravila i obaveza.
  *
- * Vlasnik piše običan tekst, a znakovi na početku reda menjaju izgled:
+ * Admin piše običan tekst, a znakovi na početku reda menjaju izgled:
  *   #  naslov     -  stavka sa tačkom     !  upozorenje (žuto)     !!  crveni tekst
  * Sve ostalo je običan red (i numerisani redovi „1. …“ ostaju kako su).
  * Red koji počinje sa „1. smena:“ dobija podebljanu oznaku smene.

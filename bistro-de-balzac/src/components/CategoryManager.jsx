@@ -6,7 +6,7 @@ import { Button, Field, Input, Modal } from './ui'
 import { countLabel, cx, errorMessage } from '../lib/utils'
 
 /**
- * Upravljanje kategorijama (samo vlasnik).
+ * Upravljanje kategorijama (samo admin).
  * Redosled ovde je redosled kojim radnik vidi kategorije u popisu.
  */
 export default function CategoryManager({ open, onClose, categories, items, onChanged }) {
@@ -102,7 +102,7 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
     <>
       <Modal open={open} onClose={() => !working && onClose()} title="Kategorije" size="md">
         <div className="space-y-4">
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-stone-600">
             Redosled ovde je redosled kojim radnik vidi kategorije u popisu. Strelicama ih
             pomeraj gore-dole.
           </p>
@@ -119,7 +119,7 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
             </Button>
           </form>
 
-          <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+          <ul className="divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200">
             {categories.map((category, index) => {
               const used = countIn(category.name)
               return (
@@ -130,7 +130,7 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
                       onClick={() => move(index, -1)}
                       disabled={index === 0 || working}
                       aria-label={`Pomeri ${category.name} gore`}
-                      className="px-1 text-xs leading-none text-slate-400 transition hover:text-slate-800 disabled:opacity-25"
+                      className="px-1 text-xs leading-none text-stone-400 transition hover:text-stone-800 disabled:opacity-25"
                     >
                       ▲
                     </button>
@@ -139,17 +139,17 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
                       onClick={() => move(index, 1)}
                       disabled={index === categories.length - 1 || working}
                       aria-label={`Pomeri ${category.name} dole`}
-                      className="px-1 text-xs leading-none text-slate-400 transition hover:text-slate-800 disabled:opacity-25"
+                      className="px-1 text-xs leading-none text-stone-400 transition hover:text-stone-800 disabled:opacity-25"
                     >
                       ▼
                     </button>
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-slate-800">
+                    <p className="truncate text-sm font-semibold text-stone-800">
                       {category.name}
                     </p>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-stone-400">
                       {countLabel(used, 'artikal')}
                     </p>
                   </div>
@@ -164,7 +164,7 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={cx(used > 0 ? 'text-slate-300' : 'text-rose-600')}
+                    className={cx(used > 0 ? 'text-stone-300' : 'text-rose-600')}
                     disabled={used > 0}
                     title={used > 0 ? 'Prvo premesti artikle u drugu kategoriju' : undefined}
                     onClick={() => setConfirmDelete(category)}
@@ -176,7 +176,7 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
             })}
 
             {categories.length === 0 && (
-              <li className="px-4 py-8 text-center text-sm text-slate-500">
+              <li className="px-4 py-8 text-center text-sm text-stone-500">
                 Još nema kategorija. Dodaj prvu iznad.
               </li>
             )}
@@ -239,7 +239,7 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
           </div>
         }
       >
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-stone-600">
           Kategorija <strong>{confirmDelete?.name}</strong> je prazna i može da se obriše. Stari
           izveštaji koji je pominju ostaju netaknuti.
         </p>

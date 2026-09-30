@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast, useToastOffset } from '../context/ToastContext'
@@ -20,12 +20,12 @@ import {
   Input,
   Modal,
   MoneyInput,
-  Select,
   Textarea,
 } from '../components/ui'
 import {
   SHIFTS,
   SHIFT_LABELS,
+  SHIFT_SHORT,
   countLabel,
   cx,
   errorMessage,
@@ -105,6 +105,21 @@ function moneyFields(rep) {
   }
 }
 
+/**
+ * Šta se sa aparata za kartice slika na kraju smene.
+ *
+ *   prva smena i međusmena  →  ukupan izveštaj
+ *   druga smena             →  kraj dana (zaključenje)
+ *
+ * Taj izveštaj ide na ISTU sliku sa izveštajem prodaje po operateru — tako
+ * se odmah vidi da se kartice sa kase i sa aparata poklapaju.
+ */
+function terminalReportOf(shift) {
+  return shift === 'druga'
+    ? 'kraj dana sa aparata za kartice'
+    : 'ukupan izveštaj sa aparata za kartice'
+}
+
 /** Popisan artikal = upisano mu je prodato (i 0 se računa). */
 const isDone = (row) => (row?.p ?? '') !== ''
 
@@ -115,6 +130,9 @@ export default function NewReport() {
   const { profile } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // „Ispravi popis“ sa izveštaja vodi ovde sa ?izvestaj=<id> — otvara baš taj popis.
+  const requestedId = searchParams.get('izvestaj')
   const fileInputRef = useRef(null)
 
   const [loading, setLoading] = useState(true)
@@ -128,6 +146,7 @@ export default function NewReport() {
   const [shift, setShift] = useState('prva')
 
   /* Otvorena smena */
+  const [myOpen, setMyOpen] = useState([]) // sve smene u kojima je radnik trenutno
   const [reportId, setReportId] = useState(null)
   const [status, setStatus] = useState(null)
   const [staff, setStaff] = useState([])
@@ -215,32 +234,47 @@ export default function NewReport() {
   }, [])
 
   /* ------------------------------------------------------------ */
-  /*  Nastavak smene koja je već otvorena                          */
-  /*  Ako je radnik već ušao u smenu pa zatvorio aplikaciju, vraća  */
-  /*  ga pravo u nju — ne pravi se nova.                           */
+  /*  Smene koje radnik trenutno ima otvorene                      */
+  /*                                                               */
+  /*  Može ih biti i više odjednom — ko radi međusmenu ulazi i u    */
+  /*  prvu i u drugu. Zato se pamte SVE, pa se između njih prelazi  */
+  /*  dugmadima, a aplikacija te po ulasku vrati u poslednju.       */
   /* ------------------------------------------------------------ */
-  useEffect(() => {
-    if (!profile?.id) return
-    let active = true
-
-    supabase
+  const loadMyOpen = useCallback(async () => {
+    if (!profile?.id) return []
+    const { data } = await supabase
       .from('shift_reports')
       .select('id, report_date, shift, shift_report_staff!inner(profile_id)')
       .eq('shift_report_staff.profile_id', profile.id)
       .in('status', ['otvoren', 'vracen'])
       .order('report_date', { ascending: false })
-      .limit(1)
-      .then(({ data }) => {
-        if (!active || !data?.length) return
-        setReportDate(data[0].report_date)
-        setShift(data[0].shift)
-        setReportId(data[0].id)
-      })
+      .limit(10)
+
+    const list = (data ?? []).map((r) => ({ id: r.id, date: r.report_date, shift: r.shift }))
+    setMyOpen(list)
+    return list
+  }, [profile?.id])
+
+  useEffect(() => {
+    if (!profile?.id) return
+    let active = true
+
+    loadMyOpen().then((list) => {
+      if (!active) return
+      if (requestedId) {
+        setReportId(requestedId)
+        return
+      }
+      if (!list.length) return
+      setReportDate(list[0].date)
+      setShift(list[0].shift)
+      setReportId(list[0].id)
+    })
 
     return () => {
       active = false
     }
-  }, [profile?.id])
+  }, [profile?.id, requestedId, loadMyOpen])
 
   /* ------------------------------------------------------------ */
   /*  Postoji li već smena za izabrani datum?                      */
@@ -584,6 +618,36 @@ export default function NewReport() {
   const joinsExisting = peek?.exists === true && peek.status === 'otvoren'
   const shiftTaken = peek?.exists === true && peek.status !== 'otvoren'
 
+  /** Koje smene tog dana radnik već ima otvorene. */
+  const myShiftsToday = useMemo(
+    () => new Set(myOpen.filter((r) => r.date === reportDate).map((r) => r.shift)),
+    [myOpen, reportDate],
+  )
+
+  /**
+   * Prelazak na drugu smenu istog dana.
+   *
+   * Ako je radnik već u njoj — otvara se njen popis. Ako nije — prikazuje se
+   * dugme za ulazak. Sve što čeka na upis se prvo upiše, da ne bi završilo u
+   * pogrešnom popisu.
+   */
+  async function switchShift(value) {
+    if (value === shift) return
+    if (reportId) await flushPending()
+
+    const mine = myOpen.find((r) => r.date === reportDate && r.shift === value)
+    setShift(value)
+    setStatus(null)
+    setStaff([])
+    setRows({})
+    setImages([])
+    setPazar('')
+    setCard('')
+    setNote('')
+    setTaskDone(false)
+    setReportId(mine ? mine.id : null)
+  }
+
   async function joinShift() {
     if (!reportDate) return toast.error('Izaberi datum smene.')
 
@@ -596,6 +660,7 @@ export default function NewReport() {
 
     if (error) return toast.error(errorMessage(error, 'Ne mogu da uđem u smenu.'))
     setReportId(data)
+    await loadMyOpen()
     toast.success(
       joinsExisting ? 'Ušao si u smenu — dnevnica ti se računa.' : 'Smena je otvorena.',
     )
@@ -620,6 +685,7 @@ export default function NewReport() {
     setCard('')
     setNote('')
     setTaskDone(false)
+    await loadMyOpen()
     toast.info('Izašao si iz smene — dnevnica se više ne računa.')
   }
 
@@ -651,7 +717,7 @@ export default function NewReport() {
       if (!map.has(item.category)) map.set(item.category, [])
       map.get(item.category).push(item)
     }
-    // Redosled kategorija je onaj koji je vlasnik podesio u Artikli -> Kategorije.
+    // Redosled kategorija je onaj koji je admin podesio u Artikli -> Kategorije.
     const compare = categoryComparator(categories)
     return Array.from(map.entries()).sort((a, b) => compare(a[0], b[0]))
   }, [items, search, categories])
@@ -760,7 +826,7 @@ export default function NewReport() {
     if (pazar === '') return 'Unesi pazar.'
     if (cardTooBig) return 'Kartice ne mogu biti veće od pazara.'
     if (images.length === 0) {
-      return 'Slikaj izveštaj prodaje po operateru — bez toga smena ne može da se zatvori.'
+      return `Slikaj izveštaj prodaje po operateru i ${terminalReportOf(shift)} — oboje na jednoj slici.`
     }
     return null
   }
@@ -793,7 +859,7 @@ export default function NewReport() {
       if (error) throw error
 
       setConfirmOpen(false)
-      toast.success('Smena je zatvorena i poslata vlasniku.')
+      toast.success('Smena je zatvorena i poslata adminu.')
       navigate(`/izvestaj/${reportId}`, { replace: true })
     } catch (err) {
       console.error(err)
@@ -812,13 +878,7 @@ export default function NewReport() {
     <Card>
       <CardHeader
         title="Smena"
-        subtitle={
-          reportId
-            ? 'Popis se deli sa svima u smeni'
-            : joinsExisting
-              ? 'Ova smena je u toku'
-              : 'Izaberi datum i smenu'
-        }
+        subtitle={joinsExisting && !reportId ? 'U toku' : undefined}
         action={
           reportId && editable ? (
             <span
@@ -835,26 +895,55 @@ export default function NewReport() {
         }
       />
       <div className="space-y-4 p-4">
-        {/* min-w-0: da nijedno polje ne izađe iz svoje polovine na uskom telefonu */}
-        <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
-          <Field label="Datum">
-            <Input
-              type="date"
-              value={reportDate}
-              max={todayISO()}
-              disabled={!!reportId}
-              onChange={(e) => setReportDate(e.target.value)}
-            />
-          </Field>
-          <Field label="Smena">
-            <Select value={shift} disabled={!!reportId} onChange={(e) => setShift(e.target.value)}>
-              {SHIFTS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
+        <Field label="Datum">
+          <Input
+            type="date"
+            value={reportDate}
+            max={todayISO()}
+            disabled={!!reportId}
+            onChange={(e) => setReportDate(e.target.value)}
+          />
+        </Field>
+
+        {/* Tri dugmeta umesto padajućeg menija — odmah se vidi u kojim si
+            smenama tog dana. Ko radi međusmenu ulazi i u prvu i u drugu, pa
+            ih može biti i više označenih. */}
+        <div>
+          <span className="label">Smena</span>
+          <div className="grid grid-cols-3 gap-1.5">
+            {SHIFTS.map((s) => {
+              const mine = myShiftsToday.has(s.value)
+              const active = s.value === shift
+              return (
+                <button
+                  key={s.value}
+                  type="button"
+                  onClick={() => switchShift(s.value)}
+                  aria-pressed={active}
+                  className={cx(
+                    'relative rounded-2xl px-2 py-2.5 text-[13px] font-semibold transition',
+                    active
+                      ? 'bg-ink text-white'
+                      : mine
+                        ? 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-600/20'
+                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200/70',
+                  )}
+                >
+                  {SHIFT_SHORT[s.value]}
+                  {mine && !active && (
+                    <span className="ml-1 text-brand-600" aria-hidden="true">
+                      ✓
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+          {myShiftsToday.size > 1 && (
+            <p className="hint">
+              Radiš {myShiftsToday.size} smene ovog dana — dnevnica je jedna.
+            </p>
+          )}
         </div>
 
         {reportId ? (
@@ -884,11 +973,7 @@ export default function NewReport() {
                 </div>
               ))}
             </div>
-            <p className="hint">
-              {staffNames.length > 1
-                ? `Vas ${staffNames.length} radi ovu smenu i delite isti popis — sve što jedan upiše, drugi odmah vidi. Svako dobija punu dnevnicu.`
-                : 'Ko još uđe u ovu smenu, radi na istom popisu i dobija punu dnevnicu za nju.'}
-            </p>
+            <p className="hint">Isti popis za sve u smeni. Dnevnica se računa po danu.</p>
 
             {editable && (
               <Button
@@ -905,13 +990,10 @@ export default function NewReport() {
         ) : (
           <div>
             {joinsExisting && peek.names.length > 0 && (
-              <div className="mb-3 rounded-xl bg-brand-50 px-3.5 py-2.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-700">
-                  Smena je već otvorena
-                </p>
-                <p className="mt-0.5 text-sm text-stone-700">
-                  U njoj {plural(peek.names.length, ['je', 'su', 'je'])}{' '}
-                  <strong>{peek.names.join(', ')}</strong>. Ulaskom radiš na istom popisu.
+              <div className="mb-3 rounded-2xl bg-brand-50 px-3.5 py-2.5">
+                <p className="eyebrow text-brand-600">Već u smeni</p>
+                <p className="mt-0.5 text-sm font-semibold text-stone-800">
+                  {peek.names.join(', ')}
                 </p>
               </div>
             )}
@@ -929,10 +1011,10 @@ export default function NewReport() {
 
             <p className={cx('hint', shiftTaken && 'text-rose-600')}>
               {shiftTaken
-                ? 'Ova smena je već zatvorena i u nju se više ne može ući. Izaberi drugu smenu ili se javi vlasniku.'
-                : joinsExisting
-                  ? 'Ko uđe u smenu, tome se računa dnevnica za nju.'
-                  : 'Otvaranjem smene počinje popis. Ko posle uđe u nju, radi na istom popisu i takođe dobija punu dnevnicu.'}
+                ? 'Smena je zatvorena — izaberi drugu.'
+                : myShiftsToday.size > 0
+                  ? 'Već radiš ovaj dan — dnevnica ostaje jedna.'
+                  : 'Ulaskom u smenu ti se računa dnevnica.'}
             </p>
           </div>
         )}
@@ -948,10 +1030,7 @@ export default function NewReport() {
         <Card>
           <div className="space-y-3 p-6 text-center">
             <p className="text-base font-bold text-stone-900">Smena je zatvorena</p>
-            <p className="text-sm text-stone-500">
-              Popis je poslat vlasniku i više ne može da se menja. Ako nešto ne valja, vlasnik će
-              ga vratiti na ispravku.
-            </p>
+            <p className="text-[13px] text-stone-400">Popis je poslat adminu.</p>
             <Button type="button" onClick={() => navigate(`/izvestaj/${reportId}`)}>
               Otvori izveštaj
             </Button>
@@ -967,20 +1046,13 @@ export default function NewReport() {
       <div className="space-y-4">
         {shiftCard}
         <Card>
-          <div className="space-y-2 p-6 text-center">
-            <p className="text-base font-bold text-stone-900">
+          <div className="p-6 text-center">
+            <p className="text-[13px] text-stone-400">
               {shiftTaken
-                ? 'Smena je već zatvorena'
+                ? 'Smena je zatvorena.'
                 : joinsExisting
-                  ? 'Popis je već u toku'
-                  : 'Popis počinje otvaranjem smene'}
-            </p>
-            <p className="text-sm text-stone-500">
-              {shiftTaken
-                ? 'Popis za ovu smenu je poslat vlasniku. Ako nešto treba da se ispravi, vlasnik je vraća na ispravku.'
-                : joinsExisting
-                  ? 'Čim uđeš, vidiš sve što je kolega do sad upisao i možeš da nastaviš na istom popisu.'
-                  : 'Čim otvoriš smenu, popis se čuva u bazu dok kucaš. Ako vam se pridruži još neko, svi vidite i menjate isti popis, i svima se piše dnevnica.'}
+                  ? 'Uđi u smenu da nastaviš popis.'
+                  : 'Otvori smenu da počne popis.'}
             </p>
           </div>
         </Card>
@@ -1023,7 +1095,7 @@ export default function NewReport() {
             {/* Zbir se vidi i kad je zatvoren — ne mora da se otvara samo da se pogleda. */}
             <span className="mt-0.5 block truncate text-[13px] text-stone-500">
               {pazar === '' && card === ''
-                ? 'Pazar i kartice — još nije uneto'
+                ? 'Nije uneto'
                 : `Kartice ${formatMoneyShort(cardNum)} · Predato ${formatMoneyShort(
                     Math.max(0, cashNum),
                   )}`}
@@ -1066,25 +1138,14 @@ export default function NewReport() {
             </Field>
           </div>
 
-          <div className="flex gap-2.5 rounded-xl bg-amber-50/50 px-3.5 py-2.5 ring-1 ring-inset ring-amber-200/60">
-            <span className="text-base leading-none opacity-60" aria-hidden="true">
-              ⚠️
-            </span>
-            <p className="text-xs leading-relaxed text-amber-900/75">
-              Upiši <strong className="font-semibold">tačne iznose sa kase, bez zaokruživanja</strong>
-              . Na primer <strong className="font-semibold">34.560</strong>, a ne 34.500.
-            </p>
-          </div>
+          <p className="text-[12px] text-amber-700">
+            Tačno sa kase, bez zaokruživanja — 34.560, ne 34.500.
+          </p>
 
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-stone-100 px-4 py-2.5">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-                Predato
-              </p>
-              <p className="text-[11px] text-stone-400">pazar − kartice</p>
-            </div>
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-stone-100 px-4 py-3">
+            <p className="eyebrow">Predato</p>
             <p className="text-lg font-extrabold tabular-nums text-stone-900">
-              {formatMoney(Math.max(0, cashNum))}
+              {formatMoney(Math.max(0, cashNum), false)}
             </p>
           </div>
         </div>
@@ -1095,7 +1156,7 @@ export default function NewReport() {
       <Card>
         <CardHeader
           title="Popis artikala"
-          subtitle={`Popisano ${doneCount} od ${items.length}${
+          subtitle={`${doneCount}/${items.length}${
             missingSold.length > 0 ? ` · ${missingSold.length} bez prodatog` : ''
           }${errorCount > 0 ? ` · ${errorCount} sa greškom` : ''}`}
           action={
@@ -1258,18 +1319,17 @@ export default function NewReport() {
           {grouped.length === 0 && (
             <p className="px-4 py-10 text-center text-sm text-stone-500">
               {items.length === 0
-                ? 'Vlasnik još nije dodao artikle. Javi mu se.'
+                ? 'Admin još nije dodao artikle. Javi mu se.'
                 : 'Nema artikla za traženi pojam.'}
             </p>
           )}
         </div>
       </Card>
 
-      {/* ---------- Izveštaj prodaje po operateru ---------- */}
+      {/* ---------- Slika izveštaja (kasa + aparat za kartice) ---------- */}
       <Card className={cx(images.length === 0 && 'ring-1 ring-rose-300')}>
         <CardHeader
-          title="Izveštaj prodaje po operateru"
-          subtitle="Obavezno — slikaj izveštaj sa kase"
+          title="Slika izveštaja"
           action={
             images.length === 0 ? (
               <Badge className="shrink-0 bg-rose-100 text-rose-700 ring-rose-600/20">
@@ -1300,8 +1360,15 @@ export default function NewReport() {
             disabled={images.length >= 6 || uploading}
             loading={uploading}
           >
-            {images.length === 0 ? 'Slikaj izveštaj' : 'Dodaj još'}
+            {images.length === 0 ? 'Slikaj izveštaje' : 'Dodaj još'}
           </Button>
+
+          {/* Pravilo je kratko koliko može, ali mora da ostane: jedna slika,
+              dva izveštaja, i koji od dva sa aparata zavisi od smene. */}
+          <p className="hint">
+            Na jednoj slici: <strong>prodaja po operateru</strong> i{' '}
+            <strong>{terminalReportOf(shift)}</strong>.
+          </p>
 
           {images.length > 0 && (
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
@@ -1313,7 +1380,7 @@ export default function NewReport() {
                   {image.url && (
                     <img
                       src={image.url}
-                      alt="Izveštaj prodaje po operateru"
+                      alt="Slika izveštaja sa kase i aparata za kartice"
                       className="h-full w-full object-cover"
                     />
                   )}
@@ -1336,7 +1403,6 @@ export default function NewReport() {
       <Card>
         <CardHeader
           title={`Dnevna obaveza — ${dailyTask.day}`}
-          subtitle="Štikliraj kad je urađena"
           action={
             taskDone ? (
               <Badge className="shrink-0 bg-emerald-100 text-emerald-800 ring-emerald-600/20">
@@ -1349,9 +1415,7 @@ export default function NewReport() {
           {dailyTask.text ? (
             <RuleText body={dailyTask.text} />
           ) : (
-            <p className="text-sm text-stone-500">
-              Za ovaj dan nema upisane obaveze u „Dnevnim obavezama“.
-            </p>
+            <p className="text-[13px] text-stone-400">Nema obaveze za ovaj dan.</p>
           )}
 
           <button
@@ -1386,7 +1450,7 @@ export default function NewReport() {
                 taskDone ? 'text-emerald-800' : 'text-stone-800',
               )}
             >
-              Dnevna obaveza za ovu smenu je urađena
+              Urađeno
             </span>
           </button>
         </div>
@@ -1394,11 +1458,11 @@ export default function NewReport() {
 
       {/* ---------- Napomena ---------- */}
       <Card>
-        <CardHeader title="Napomena za admina" subtitle="Opciono — sve što treba da zna" />
+        <CardHeader title="Napomena" subtitle="Opciono" />
         <div className="p-4">
           <Textarea
             rows={3}
-            placeholder="npr. nestao je Heineken oko 22h, pokvarila se mašina za led"
+            placeholder="npr. nestao Heineken oko 22h"
             value={note}
             onChange={(e) => {
               setNote(e.target.value)
@@ -1416,9 +1480,9 @@ export default function NewReport() {
       <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-xs text-stone-500">Predato</p>
+            <p className="eyebrow">Predato</p>
             <p className="truncate text-lg font-extrabold tabular-nums text-stone-900">
-              {formatMoney(Math.max(0, cashNum))}
+              {formatMoney(Math.max(0, cashNum), false)}
             </p>
           </div>
           <Button type="submit" size="lg" loading={submitting} className="shrink-0">
@@ -1450,7 +1514,7 @@ export default function NewReport() {
         }
       >
         <p className="text-sm text-stone-600">
-          Ovim brišeš ceo popis ove smene — i ono što je upisao kolega. Pazar i slike ostaju.
+          Briše se ceo popis smene. Pazar i slike ostaju.
         </p>
       </Modal>
 
@@ -1477,8 +1541,7 @@ export default function NewReport() {
         }
       >
         <p className="text-sm text-stone-600">
-          Skidaš se sa spiska onih koji rade ovu smenu, pa ti se <strong>dnevnica za nju neće
-          računati</strong>. Popis ostaje — njega i dalje vide ostali u smeni.
+          Dnevnica za ovu smenu ti se neće računati. Popis ostaje.
         </p>
       </Modal>
 
@@ -1511,47 +1574,39 @@ export default function NewReport() {
         }
       >
         <div className="space-y-4">
-          <div className="rounded-xl bg-stone-100 px-4 py-3 text-sm">
+          <div className="rounded-2xl bg-stone-100 px-4 py-3 text-sm">
             <p className="font-bold text-stone-900">
               {formatDate(reportDate)} · {SHIFT_LABELS[shift]}
             </p>
-            <p className="mt-0.5 text-stone-600">
-              {staffNames.map((p) => p.name).join(', ')}
-            </p>
-            <p className="mt-0.5 text-stone-500">
-              Popisano {doneCount} od {countLabel(items.length, 'artikla')} · {images.length}{' '}
-              {plural(images.length, 'slika')} trake
-            </p>
-            <p className={cx('mt-0.5', taskDone ? 'text-emerald-700' : 'text-amber-700')}>
-              Dnevna obaveza: {taskDone ? 'urađena' : 'nije štiklirana'}
+            <p className="mt-0.5 text-stone-600">{staffNames.map((p) => p.name).join(', ')}</p>
+            <p className="mt-0.5 text-[12px] text-stone-400">
+              Popis {doneCount}/{items.length} · {countLabel(images.length, 'slika')}
+              {taskDone ? ' · obaveza urađena' : ''}
             </p>
           </div>
 
           <dl className="divide-y divide-stone-100 text-sm">
             <div className="flex justify-between py-2">
-              <dt className="text-stone-600">Pazar</dt>
-              <dd className="font-bold tabular-nums text-brand-700">{formatMoney(pazarNum)}</dd>
+              <dt className="text-stone-500">Pazar</dt>
+              <dd className="font-bold tabular-nums text-stone-900">
+                {formatMoney(pazarNum, false)}
+              </dd>
             </div>
             <div className="flex justify-between py-2">
-              <dt className="text-stone-600">Kartice</dt>
-              <dd className="font-bold tabular-nums text-sky-700">{formatMoney(cardNum)}</dd>
+              <dt className="text-stone-500">Kartice</dt>
+              <dd className="font-bold tabular-nums text-stone-900">
+                {formatMoney(cardNum, false)}
+              </dd>
             </div>
           </dl>
 
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3.5 text-white">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
-                Predato
-              </p>
-              <p className="text-xs text-stone-400">gotovina koju predaješ (pazar − kartice)</p>
-            </div>
-            <p className="text-2xl font-extrabold tabular-nums">{formatMoney(cashNum)}</p>
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-ink px-4 py-3.5 text-white">
+            <p className="eyebrow text-stone-400">Predato</p>
+            <p className="text-2xl font-extrabold tabular-nums">{formatMoney(cashNum, false)}</p>
           </div>
 
-          <p className="text-xs text-stone-500">
-            Dnevnicu za ovu smenu dobija{' '}
-            {staffNames.length > 1 ? `svih ${staffNames.length}` : 'onaj'} ko je u njoj. Posle
-            zatvaranja popis više ne možete da menjate dok ga vlasnik ne vrati na ispravku.
+          <p className="text-[12px] text-stone-400">
+            Posle zatvaranja popis se menja samo ako ga admin vrati.
           </p>
         </div>
       </Modal>

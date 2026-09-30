@@ -71,7 +71,7 @@ export default function Login() {
           className="space-y-4 rounded-2xl bg-white p-5 shadow-2xl"
           noValidate
         >
-          <Field label="Ime i prezime" hint="Isto kao što ti je vlasnik upisao nalog.">
+          <Field label="Ime i prezime" hint="Isto kao što ti je admin upisao nalog.">
             <Input
               type="text"
               autoComplete="username"
@@ -100,7 +100,7 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
-                className="absolute inset-y-0 right-3 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                className="absolute inset-y-0 right-3 text-xs font-semibold text-stone-500 hover:text-stone-800"
               >
                 {showPassword ? 'Sakrij' : 'Prikaži'}
               </button>

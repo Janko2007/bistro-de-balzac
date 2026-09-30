@@ -23,18 +23,18 @@ function HomeRoute() {
 
 function MissingConfig() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
+    <div className="flex min-h-screen items-center justify-center bg-stone-100 p-6">
       <div className="card max-w-lg p-6">
         <h1 className="text-lg font-bold text-rose-700">Nedostaje Supabase konfiguracija</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Napravi fajl <code className="rounded bg-slate-100 px-1">.env</code> u korenu projekta sa:
+        <p className="mt-2 text-sm text-stone-600">
+          Napravi fajl <code className="rounded bg-stone-100 px-1">.env</code> u korenu projekta sa:
         </p>
-        <pre className="mt-3 overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
+        <pre className="mt-3 overflow-x-auto rounded-lg bg-stone-900 p-3 text-xs text-stone-100">
 {`VITE_SUPABASE_URL=https://tvoj-projekat.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGciOi...`}
         </pre>
-        <p className="mt-3 text-sm text-slate-600">
-          Zatim restartuj <code className="rounded bg-slate-100 px-1">npm run dev</code>. Ako je
+        <p className="mt-3 text-sm text-stone-600">
+          Zatim restartuj <code className="rounded bg-stone-100 px-1">npm run dev</code>. Ako je
           aplikacija već objavljena, dodaj iste promenljive u podešavanjima na Vercel/Netlify i
           pokreni novi deploy.
         </p>

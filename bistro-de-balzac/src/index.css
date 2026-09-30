@@ -37,7 +37,7 @@
   select,
   textarea {
     font-size: 16px;
-    @apply text-slate-900;
+    @apply text-stone-900;
   }
 
   /* Uklanja strelice sa number inputa */
@@ -59,12 +59,13 @@
     padding-top: env(safe-area-inset-top, 0px);
   }
 
-  /* Polja bez senke — jedna tanka linija je dovoljna da se vidi da je polje. */
+  /* Polje je blago sivo dok ga ne diraš — pobeli tek kad kucaš u njemu.
+     Tako se forma čita kao niz polja, bez mreže tamnih linija. */
   .field {
-    @apply w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-stone-900
+    @apply w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-stone-900
            outline-none transition
            placeholder:text-stone-400
-           focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25
+           focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20
            disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500;
   }
 
@@ -77,12 +78,13 @@
   }
 
   .label {
-    @apply mb-1.5 block text-[13px] font-medium text-stone-600;
+    @apply mb-1.5 block text-[12px] font-semibold text-stone-500;
   }
 
-  /* Sitan sivi tekst ispod polja ili dugmeta — objašnjenje, ne sadržaj. */
+  /* Sitan sivi tekst ispod polja ili dugmeta — objašnjenje, ne sadržaj.
+     Kratko i u jednom redu; ako treba pasus, to nije hint nego sadržaj. */
   .hint {
-    @apply mt-1.5 text-xs leading-relaxed text-stone-500;
+    @apply mt-1.5 text-[12px] leading-snug text-stone-400;
   }
 
   /* iPhone (Safari) polju za datum daje svoju najmanju širinu i centrira
@@ -98,9 +100,10 @@
     text-align: left;
   }
 
-  /* Kartice bez senki — samo vlas linije. Manje kutija u kutijama. */
+  /* Kartica „lebdi“ jedva primetno — jedan piksel senke umesto tamne linije.
+     Zaobljenje je veće nego kod polja, pa se odmah vidi šta je grupa. */
   .card {
-    @apply rounded-2xl border border-stone-200 bg-white;
+    @apply rounded-3xl border border-stone-200/70 bg-white shadow-[0_1px_2px_rgba(28,25,23,0.04)];
   }
 
   /* Fotografija lokala — samo na ekranu za prijavu, zatamnjena.

@@ -61,20 +61,26 @@ Deno.serve(async (req) => {
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
   const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
+  // Na novijim projektima „anon“ ključ ume da izostane — tada se kao apikey
+  // koristi serverski ključ; prava i dalje određuje token prijavljenog.
+  const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || SERVICE_ROLE
 
   const authHeader = req.headers.get('Authorization') ?? ''
   if (!authHeader.startsWith('Bearer ')) return json({ error: 'Niste prijavljeni.' }, 401)
+  const token = authHeader.slice('Bearer '.length).trim()
 
   // 1) Ko poziva?
   const callerClient = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
+    auth: { autoRefreshToken: false, persistSession: false },
   })
 
+  // Token se prosleđuje izričito — na serveru nema sačuvane sesije, pa bi
+  // getUser() bez njega vratio „Auth session missing“.
   const {
     data: { user: caller },
     error: callerError,
-  } = await callerClient.auth.getUser()
+  } = await callerClient.auth.getUser(token)
 
   if (callerError || !caller) return json({ error: 'Nevažeća sesija.' }, 401)
 
@@ -110,7 +116,10 @@ Deno.serve(async (req) => {
     const password = String(body.password ?? '')
     const phone = String(body.phone ?? '').trim()
     const role = body.role === 'admin' ? 'admin' : 'radnik'
+    const payModel = body.pay_model === 'plata' ? 'plata' : 'dnevnica'
     const dailyWage = Number(body.daily_wage ?? 0)
+    const monthlySalary = Number(body.monthly_salary ?? 0)
+    const percent = Number(body.percent ?? 0)
 
     if (fullName.split(' ').length < 2) {
       return json({ error: 'Unesi ime i prezime — to je ujedno i korisničko ime.' }, 400)
@@ -119,9 +128,15 @@ Deno.serve(async (req) => {
     if (!Number.isFinite(dailyWage) || dailyWage < 0) {
       return json({ error: 'Dnevnica mora biti broj veći ili jednak nuli.' }, 400)
     }
+    if (!Number.isFinite(monthlySalary) || monthlySalary < 0) {
+      return json({ error: 'Plata mora biti broj veći ili jednak nuli.' }, 400)
+    }
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      return json({ error: 'Procenat mora biti između 0 i 100.' }, 400)
+    }
 
-    const email = loginEmail(fullName)
-    if (email.startsWith('@')) return json({ error: 'Ime sadrži samo nedozvoljene znakove.' }, 400)
+    const slug = slugifyName(fullName)
+    if (!slug) return json({ error: 'Ime sadrži samo nedozvoljene znakove.' }, 400)
 
     // Ime mora biti jedinstveno — po njemu se radnik prijavljuje.
     const { data: clash } = await admin
@@ -135,40 +150,65 @@ Deno.serve(async (req) => {
       return json({ error: `Radnik „${fullName}" već postoji. Dodaj npr. srednje slovo.` }, 400)
     }
 
-    const { data: created, error: createError } = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true, // nalog radi odmah, bez potvrde mejla
-      user_metadata: { full_name: fullName, role },
-    })
-
-    if (createError) {
-      const msg = createError.message?.includes('already')
-        ? `Nalog za „${fullName}" već postoji.`
-        : createError.message
-      return json({ error: msg }, 400)
+    // Adresa za prijavu je „ime.prezime@…“. Ako je zauzeta (to ime je ranije
+    // nosio radnik koji je u međuvremenu preimenovan), dobija broj: ime.prezime.2@…
+    // Radnik to ne vidi — prijavljuje se imenom, a mejl se traži po imenu.
+    let email = loginEmail(fullName)
+    let userId = ''
+    for (let n = 2; n <= 20; n += 1) {
+      const { data, error: createError } = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true, // nalog radi odmah, bez potvrde mejla
+        user_metadata: { full_name: fullName },
+      })
+      if (!createError && data.user) {
+        userId = data.user.id
+        break
+      }
+      const taken = /already|registered|exists/i.test(createError?.message ?? '')
+      if (!taken) return json({ error: createError?.message ?? 'Nalog nije otvoren.' }, 400)
+      email = `${slug}.${n}@${LOGIN_DOMAIN}`
     }
+    if (!userId) return json({ error: `Nalog za „${fullName}" već postoji.` }, 400)
 
-    // Trigger je već napravio profil — dopunjavamo podatke.
+    // Trigger je već napravio profil (uvek kao „radnik“) — dopunjavamo podatke
+    // i ulogu. Ovo radi serverski ključ, pa zaštitni okidač to propušta.
     const { error: profileError } = await admin.from('profiles').upsert(
       {
-        id: created.user!.id,
+        id: userId,
         email,
         full_name: fullName,
         phone: phone || null,
         role,
+        pay_model: payModel,
         daily_wage: dailyWage,
+        monthly_salary: monthlySalary,
+        percent,
         is_active: true,
         is_deleted: false,
       },
       { onConflict: 'id' },
     )
 
-    if (profileError) return json({ error: profileError.message }, 400)
+    if (profileError) {
+      // Bez profila nalog ne vredi — ne ostavljamo „polovičan“ nalog.
+      await admin.auth.admin.deleteUser(userId)
+      return json({ error: profileError.message }, 400)
+    }
 
     return json({
       success: true,
-      user: { id: created.user!.id, username: fullName, email, role, daily_wage: dailyWage },
+      user: {
+        id: userId,
+        username: fullName,
+        email,
+        role,
+        pay_model: payModel,
+        daily_wage: dailyWage,
+        monthly_salary: monthlySalary,
+        percent,
+      },
     })
   }
 

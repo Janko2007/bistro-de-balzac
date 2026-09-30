@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext'
 import { useToast, useToastOffset } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { categoryComparator, loadCategories } from '../lib/categories'
+import { heading, printDocument, statGrid, table, textBlock } from '../lib/print'
+import ReportPicker from '../components/ReportPicker'
 import {
   Badge,
   Button,
@@ -15,11 +17,13 @@ import {
   Field,
   FullPageLoader,
   Modal,
+  MoneyInput,
   Stat,
   Textarea,
 } from '../components/ui'
 import {
   SHIFT_LABELS,
+  SHIFT_STYLES,
   STATUS_LABELS,
   STATUS_STYLES,
   countLabel,
@@ -29,6 +33,7 @@ import {
   formatDateTime,
   formatMoney,
   formatQty,
+  parseNumber,
 } from '../lib/utils'
 
 export default function ReportDetail() {
@@ -37,7 +42,7 @@ export default function ReportDetail() {
   const toast = useToast()
   const navigate = useNavigate()
 
-  // Vlasnik ima traku sa dugmadima iznad donje navigacije — obaveštenja idu iznad nje.
+  // Admin ima traku sa dugmadima iznad donje navigacije — obaveštenja idu iznad nje.
   useToastOffset(130, isAdmin)
 
   const [loading, setLoading] = useState(true)
@@ -54,6 +59,9 @@ export default function ReportDetail() {
   const [allWorkers, setAllWorkers] = useState([])
   const [staffDraft, setStaffDraft] = useState([])
   const [categories, setCategories] = useState([])
+  const [pickerOpen, setPickerOpen] = useState(false)
+  // { profileId, name, full, value } — otvoren prozor za umanjenje dnevnice
+  const [wageEdit, setWageEdit] = useState(null)
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
@@ -64,7 +72,7 @@ export default function ReportDetail() {
         creator:profiles!shift_reports_created_by_fkey ( id, full_name, email ),
         verifier:profiles!shift_reports_verified_by_fkey ( id, full_name ),
         noteAuthor:profiles!shift_reports_admin_note_by_fkey ( id, full_name ),
-        staff:shift_report_staff ( profile:profiles ( id, full_name ) ),
+        staff:shift_report_staff ( wage_override, profile:profiles ( id, full_name, pay_model, daily_wage ) ),
         items:shift_report_items (
           id, item_id, item_name, unit, category,
           qty_start, qty_added, qty_new, qty_sold, qty_end, note
@@ -178,7 +186,7 @@ export default function ReportDetail() {
       if (!map.has(key)) map.set(key, [])
       map.get(key).push(item)
     }
-    // Isti redosled kao u popisu: kategorije po vlasnikovom redu, artikli po sort_order.
+    // Isti redosled kao u popisu: kategorije po Adminovom redu, artikli po sort_order.
     for (const list of map.values()) {
       list.sort((a, b) => a.sort - b.sort || a.item_name.localeCompare(b.item_name, 'sr'))
     }
@@ -226,7 +234,7 @@ export default function ReportDetail() {
   }, [groupedItems, itemFilter])
 
   /* ---------------------------------------------------------------- */
-  /*  Ko je radio u smeni — menja samo vlasnik (od toga zavise dnevnice) */
+  /*  Ko je radio u smeni — menja samo admin (od toga zavise dnevnice) */
   /* ---------------------------------------------------------------- */
   async function openStaffEditor() {
     setStaffDraft((report.staff ?? []).map((s) => s.profile?.id).filter(Boolean))
@@ -242,6 +250,39 @@ export default function ReportDetail() {
       if (error) toast.error(errorMessage(error))
       else setAllWorkers(data ?? [])
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Umanjena dnevnica za ovaj dan                                    */
+  /*  Npr. radnik je došao kasnije — dobija manje SAMO za ovu smenu.    */
+  /* ---------------------------------------------------------------- */
+  function openWageEditor(entry) {
+    setWageEdit({
+      profileId: entry.profile.id,
+      name: entry.profile.full_name,
+      full: Number(entry.profile.daily_wage ?? 0),
+      value: entry.wage_override === null || entry.wage_override === undefined
+        ? ''
+        : String(entry.wage_override),
+    })
+  }
+
+  async function saveWage(override) {
+    setWorking(true)
+    const { error } = await supabase
+      .from('shift_report_staff')
+      .update({ wage_override: override })
+      .eq('report_id', id)
+      .eq('profile_id', wageEdit.profileId)
+    setWorking(false)
+
+    if (error) {
+      toast.error(errorMessage(error))
+      return
+    }
+    setWageEdit(null)
+    toast.success(override === null ? 'Vraćena puna dnevnica.' : 'Dnevnica je umanjena za ovaj dan.')
+    load()
   }
 
   async function saveStaff() {
@@ -295,7 +336,7 @@ export default function ReportDetail() {
     load()
   }
 
-  /** Poruka radniku — vlasnik je piše kad god hoće, ne samo pri vraćanju. */
+  /** Poruka radniku — Admin je piše kad god hoće, ne samo pri vraćanju. */
   async function saveAdminNote() {
     setWorking(true)
     const { error } = await supabase
@@ -328,6 +369,125 @@ export default function ReportDetail() {
     navigate('/', { replace: true })
   }
 
+  /**
+   * Potvrđen popis je za radnika zaključan: ostaju mu samo datum i smena,
+   * poruka da iznose vidi admin, ko je radio i dnevna obaveza. Pazar,
+   * popis artikala, slike i napomene se sakrivaju.
+   *
+   * Dok popis nije potvrđen radnik vidi sve — sam ga je i popunio.
+   */
+  const lockedForWorker = !isAdmin && report?.status === 'potvrdjen'
+
+  /** Popis ove smene na papiru — `parts` bira šta ulazi. */
+  function printReport(parts) {
+    const has = (key) => parts.includes(key)
+
+    const columns = [
+      { label: 'Artikal' },
+      { label: 'Jed.', width: '9%' },
+      { label: 'Početno', align: 'right', width: '11%' },
+      { label: 'Dodato', align: 'right', width: '11%' },
+      { label: 'Novo', align: 'right', width: '11%' },
+      { label: 'Prodato', align: 'right', width: '11%' },
+      { label: 'Krajnje', align: 'right', width: '11%' },
+    ]
+
+    const rows = []
+    for (const [category, catItems] of groupedItems) {
+      const catSold = catItems.reduce((s, i) => s + Number(i.qty_sold ?? 0), 0)
+      rows.push({ kind: 'group', label: category, right: `prodato ${formatQty(catSold)}` })
+      for (const item of catItems) {
+        rows.push({
+          muted: item.missing,
+          cells: [
+            item.missing ? `${item.item_name} — nije popisano` : item.item_name,
+            item.unit,
+            formatQty(item.qty_start),
+            formatQty(item.qty_added),
+            formatQty(item.qty_new),
+            { value: formatQty(item.qty_sold), strong: !item.missing },
+            formatQty(item.qty_end),
+          ],
+        })
+      }
+    }
+    rows.push({
+      kind: 'total',
+      cells: [
+        'Ukupno prodato',
+        '',
+        '',
+        '',
+        '',
+        formatQty(soldTotal),
+        '',
+      ],
+    })
+
+    /* Uz ime ide i umanjena dnevnica, ako je za taj dan upisana — da se na
+       papiru vidi zašto je nekome manje. */
+    const staffLine =
+      staffList.length > 0
+        ? staffList
+            .map((s) =>
+              isAdmin && s.wage_override !== null && s.wage_override !== undefined
+                ? `${s.profile.full_name} (${formatMoney(s.wage_override, false)})`
+                : s.profile.full_name,
+            )
+            .join(', ')
+        : '—'
+
+    printDocument({
+      title: `Popis smene — ${formatDate(report.report_date)}`,
+      subtitle: `${SHIFT_LABELS[report.shift]} · ${STATUS_LABELS[report.status] ?? report.status}`,
+      meta: [
+        { label: 'U smeni', value: staffLine },
+        { label: 'Poslao', value: report.creator?.full_name || '—' },
+        report.status === 'potvrdjen' && report.verified_at
+          ? { label: 'Potvrdio', value: `${report.verifier?.full_name || 'Admin'}, ${formatDateTime(report.verified_at)}` }
+          : null,
+      ],
+      content: [
+        has('obracun')
+          ? statGrid([
+              lockedForWorker
+                ? null
+                : { label: 'Pazar', value: formatMoney(report.total_amount, false), sub: 'RSD' },
+              lockedForWorker
+                ? null
+                : { label: 'Kartice', value: formatMoney(report.card_amount, false), sub: 'RSD' },
+              lockedForWorker
+                ? null
+                : {
+                    label: 'Predato',
+                    value: formatMoney(report.cash_amount, false),
+                    sub: 'pazar − kartice',
+                  },
+              {
+                label: 'Popisano',
+                value: `${itemCounts.sve - itemCounts.nepopisano}/${itemCounts.sve}`,
+                sub: 'artikala',
+              },
+              {
+                label: 'Dnevna obaveza',
+                value: report.daily_task_done ? 'urađena' : 'nije',
+                sub: countLabel(imageUrls.length, 'slika'),
+              },
+            ])
+          : '',
+        has('napomene') ? textBlock('Napomena radnika', report.note) : '',
+        has('napomene')
+          ? textBlock(
+              `Poruka admina${report.noteAuthor?.full_name ? ` · ${report.noteAuthor.full_name}` : ''}`,
+              report.admin_note,
+            )
+          : '',
+        has('popis') ? heading('Popis artikala', `ukupno prodato ${formatQty(soldTotal)}`) : '',
+        has('popis') ? table({ columns, rows, empty: 'Popis je prazan.' }) : '',
+      ].join(''),
+    })
+  }
+
   if (loading) return <FullPageLoader />
 
   if (!report) {
@@ -344,9 +504,10 @@ export default function ReportDetail() {
   }
 
   const isOwner = report.created_by === profile?.id
-  const staffNames = (report.staff ?? [])
-    .map((s) => s.profile?.full_name)
-    .filter(Boolean)
+  const staffList = (report.staff ?? [])
+    .filter((s) => s.profile?.id)
+    .sort((a, b) => String(a.profile.full_name).localeCompare(String(b.profile.full_name)))
+  const staffNames = staffList.map((s) => s.profile.full_name)
 
   return (
     <div className="space-y-4 pb-24">
@@ -355,55 +516,72 @@ export default function ReportDetail() {
         <div className="flex flex-wrap items-start justify-between gap-3 p-4">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-extrabold text-slate-900">
+              <h1 className="text-xl font-extrabold text-stone-900">
                 {formatDate(report.report_date)}
               </h1>
+              <Badge className={SHIFT_STYLES[report.shift] ?? SHIFT_STYLES.prva}>
+                {SHIFT_LABELS[report.shift]}
+              </Badge>
               <Badge className={STATUS_STYLES[report.status]}>{STATUS_LABELS[report.status]}</Badge>
             </div>
-            <p className="mt-1 text-sm text-slate-500">
-              {SHIFT_LABELS[report.shift]} · poslao {report.creator?.full_name || '—'} ·{' '}
-              {formatDateTime(report.created_at)}
+            <p className="mt-1 text-[12px] text-stone-400">
+              {report.creator?.full_name || '—'} · {formatDateTime(report.created_at)}
             </p>
             {report.status === 'potvrdjen' && report.verified_at && (
-              <p className="mt-1 text-sm font-medium text-emerald-700">
-                ✅ Potvrdio {report.verifier?.full_name || 'vlasnik'} ·{' '}
+              <p className="mt-1 text-[12px] font-medium text-emerald-700">
+                Potvrdio {report.verifier?.full_name || 'admin'} ·{' '}
                 {formatDateTime(report.verified_at)}
               </p>
             )}
           </div>
 
-          <Button variant="secondary" size="sm" onClick={() => navigate(-1)}>
-            ← Nazad
-          </Button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* Potvrđen popis radnik ne preuzima — nema šta da se odštampa. */}
+            {!lockedForWorker && (
+              <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
+                Preuzmi
+              </Button>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => navigate(-1)}>
+              ← Nazad
+            </Button>
+          </div>
         </div>
 
-        <div className="space-y-3 border-t border-slate-200 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Obračun smene
-          </p>
-
-          {/* Pazar, kartice, pa predato — predato = pazar − kartice. */}
-          <div className="grid grid-cols-2 gap-2">
-            <Stat label="Pazar" value={formatMoney(report.total_amount, false)} tone="total" />
-            <Stat label="Kartice" value={formatMoney(report.card_amount, false)} tone="card" />
-          </div>
-
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3.5 text-white">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">
-                Predato
-              </p>
-              <p className="text-xs text-stone-400">pazar − kartice</p>
-            </div>
-            <p className="text-2xl font-extrabold tabular-nums">
-              {formatMoney(report.cash_amount)}
+        {lockedForWorker ? (
+          /* Potvrđen popis — radnik više ne vidi iznose. */
+          <div className="border-t border-stone-200 p-4">
+            <p className="eyebrow">
+              Obračun smene
+            </p>
+            <p className="mt-1.5 text-sm text-stone-500">
+              Popis je potvrđen — iznose od sada vidi samo admin.
             </p>
           </div>
-        </div>
+        ) : (
+          <div className="space-y-3 border-t border-stone-200 p-4">
+            <p className="eyebrow">
+              Obračun smene
+            </p>
 
-        <div className="border-t border-slate-200 px-4 py-3">
+            {/* Pazar, kartice, pa predato — predato = pazar − kartice. */}
+            <div className="grid grid-cols-2 gap-2">
+              <Stat label="Pazar" value={formatMoney(report.total_amount, false)} tone="total" />
+              <Stat label="Kartice" value={formatMoney(report.card_amount, false)} />
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-ink px-4 py-3.5 text-white">
+              <p className="eyebrow text-stone-400">Predato</p>
+              <p className="text-2xl font-extrabold tabular-nums">
+                {formatMoney(report.cash_amount, false)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="border-t border-stone-200 px-4 py-3">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <p className="eyebrow">
               U smeni radili
             </p>
             {isAdmin && (
@@ -412,28 +590,73 @@ export default function ReportDetail() {
               </Button>
             )}
           </div>
-          <div className="mt-1.5 flex flex-wrap gap-2">
-            {staffNames.length > 0 ? (
-              staffNames.map((name) => (
-                <Badge key={name} className="bg-slate-100 text-slate-700 ring-slate-300">
-                  {name}
-                </Badge>
-              ))
+          {/* Radnik vidi samo imena. Admin vidi i dnevnicu za taj dan, sa
+              dugmetom kojim je umanjuje baš za ovu smenu. */}
+          {isAdmin ? (
+            staffList.length > 0 ? (
+              <ul className="mt-1.5 divide-y divide-stone-100">
+                {staffList.map((entry) => {
+                  const cut = entry.wage_override !== null && entry.wage_override !== undefined
+                  const plata = entry.profile?.pay_model === 'plata'
+                  return (
+                    <li
+                      key={entry.profile.id}
+                      className="flex items-center justify-between gap-2 py-1.5"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-800">
+                        {entry.profile.full_name}
+                      </span>
+                      {!plata && (
+                        <span className="shrink-0 text-[13px] tabular-nums">
+                          {cut ? (
+                            <>
+                              <span className="text-stone-400 line-through">
+                                {formatMoney(entry.profile.daily_wage, false)}
+                              </span>{' '}
+                              <b className="text-rose-600">
+                                {formatMoney(entry.wage_override, false)}
+                              </b>
+                            </>
+                          ) : (
+                            <span className="text-stone-500">
+                              {formatMoney(entry.profile.daily_wage, false)}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => openWageEditor(entry)}
+                      >
+                        {cut ? 'Izmeni' : 'Umanji'}
+                      </Button>
+                    </li>
+                  )
+                })}
+              </ul>
             ) : (
-              <span className="text-sm text-slate-400">—</span>
-            )}
-          </div>
-          {isAdmin && (
-            <p className="mt-1.5 text-xs text-slate-500">
-              Po ovome se računaju dnevnice. Upisuje se svako ko je ušao u smenu — ovde možeš da
-              ispraviš spisak.
-            </p>
+              <span className="text-sm text-stone-400">—</span>
+            )
+          ) : (
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {staffNames.length > 0 ? (
+                staffNames.map((name) => (
+                  <Badge key={name} className="bg-stone-100 text-stone-700 ring-stone-300">
+                    {name}
+                  </Badge>
+                ))
+              ) : (
+                <span className="text-sm text-stone-400">—</span>
+              )}
+            </div>
           )}
         </div>
 
         {/* Da li je radnik štiklirao dnevnu obavezu za ovu smenu */}
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <div className="flex items-center justify-between gap-3 border-t border-stone-200 px-4 py-3">
+          <p className="eyebrow">
             Dnevna obaveza
           </p>
           {report.daily_task_done ? (
@@ -445,19 +668,19 @@ export default function ReportDetail() {
           )}
         </div>
 
-        {report.note && (
-          <div className="border-t border-slate-200 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {report.note && !lockedForWorker && (
+          <div className="border-t border-stone-200 px-4 py-3">
+            <p className="eyebrow">
               Napomena za admina
             </p>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{report.note}</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-stone-700">{report.note}</p>
           </div>
         )}
 
-        {(report.admin_note || isAdmin) && (
+        {(report.admin_note || isAdmin) && !lockedForWorker && (
           <div
             className={cx(
-              'border-t border-slate-200 px-4 py-3',
+              'border-t border-stone-200 px-4 py-3',
               report.admin_note && 'bg-amber-50',
             )}
           >
@@ -465,11 +688,11 @@ export default function ReportDetail() {
               <p
                 className={cx(
                   'text-xs font-semibold uppercase tracking-wide',
-                  report.admin_note ? 'text-amber-700' : 'text-slate-500',
+                  report.admin_note ? 'text-amber-700' : 'text-stone-500',
                 )}
               >
                 {report.admin_note
-                  ? `Poruka · ${report.noteAuthor?.full_name || 'vlasnik'}`
+                  ? `Poruka · ${report.noteAuthor?.full_name || 'Admin'}`
                   : 'Poruka radniku'}
               </p>
               {isAdmin && (
@@ -491,7 +714,7 @@ export default function ReportDetail() {
                 )}
               </>
             ) : (
-              <p className="mt-1 text-sm text-slate-400">
+              <p className="mt-1 text-sm text-stone-400">
                 Radnik će je videti uz ovaj izveštaj.
               </p>
             )}
@@ -499,16 +722,18 @@ export default function ReportDetail() {
         )}
       </Card>
 
+      {/* Potvrđen popis radnik više ne pregleda — ostaju mu samo datum,
+          poruka o iznosima, ko je radio i dnevna obaveza. */}
+      {!lockedForWorker && (
+        <>
       {/* ---------- Slike ---------- */}
       <Card>
         <CardHeader
-          title="Izveštaj prodaje po operateru"
-          subtitle={countLabel(imageUrls.length, 'slika')}
+          title="Slike izveštaja"
+          subtitle={imageUrls.length > 0 ? String(imageUrls.length) : undefined}
         />
         {imageUrls.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-slate-500">
-            Nema priloženih slika za ovu smenu.
-          </p>
+          <p className="px-4 py-8 text-center text-[13px] text-stone-400">Nema slika.</p>
         ) : (
           <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4">
             {imageUrls.map((img) => (
@@ -516,15 +741,15 @@ export default function ReportDetail() {
                 key={img.id}
                 type="button"
                 onClick={() => setLightbox(img.url)}
-                className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-stone-200 bg-stone-50"
               >
                 <img
                   src={img.url}
-                  alt="Izveštaj prodaje po operateru"
+                  alt="Slika izveštaja sa kase i aparata za kartice"
                   loading="lazy"
                   className="h-full w-full object-cover transition group-hover:scale-105"
                 />
-                <span className="absolute inset-x-0 bottom-0 bg-slate-900/60 py-1 text-center text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100">
+                <span className="absolute inset-x-0 bottom-0 bg-stone-900/60 py-1 text-center text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100">
                   Uvećaj
                 </span>
               </button>
@@ -537,9 +762,9 @@ export default function ReportDetail() {
       <Card>
         <CardHeader
           title="Popis artikala"
-          subtitle={`Popisano ${itemCounts.sve - itemCounts.nepopisano} od ${
+          subtitle={`${itemCounts.sve - itemCounts.nepopisano}/${
             itemCounts.sve
-          } · ukupno prodato ${formatQty(soldTotal)}`}
+          } · prodato ${formatQty(soldTotal)}`}
           action={
             itemFilter === 'sve' ? (
               <Button
@@ -560,7 +785,7 @@ export default function ReportDetail() {
 
         {/* Filter: svi artikli / nije popisano / popisano, a nije prodato */}
         {groupedItems.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 border-b border-slate-100 px-4 py-2.5">
+          <div className="flex flex-wrap gap-1.5 border-b border-stone-100 px-4 py-2.5">
             {[
               ['sve', 'Svi artikli'],
               ['nepopisano', 'Nije popisano'],
@@ -585,15 +810,15 @@ export default function ReportDetail() {
         )}
 
         {groupedItems.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-slate-500">Popis je prazan.</p>
+          <p className="px-4 py-8 text-center text-sm text-stone-500">Popis je prazan.</p>
         ) : visibleGroups.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-slate-500">
+          <p className="px-4 py-8 text-center text-sm text-stone-500">
             {itemFilter === 'nepopisano'
               ? 'Popisani su svi artikli.'
               : 'Svaki popisan artikal je prodat bar jednom.'}
           </p>
         ) : (
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-stone-100">
             {visibleGroups.map(([category, catItems]) => {
               // U filtriranom prikazu kategorije su odmah otvorene — da se vidi šta je izdvojeno.
               const open = itemFilter !== 'sve' || openCats.has(category)
@@ -614,12 +839,12 @@ export default function ReportDetail() {
                               {catMissing} nepopisano
                             </span>
                           )}
-                          <span className="text-xs font-semibold tabular-nums text-slate-500">
+                          <span className="text-xs font-semibold tabular-nums text-stone-500">
                             prodato {formatQty(catSold)}
                           </span>
                         </span>
                       ) : (
-                        <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-500">
+                        <span className="shrink-0 text-xs font-semibold tabular-nums text-stone-500">
                           {countLabel(catItems.length, 'artikal')}
                         </span>
                       )
@@ -630,7 +855,7 @@ export default function ReportDetail() {
                     <div className="overflow-x-auto">
                       <table className="w-full min-w-[500px] border-collapse text-sm">
                         <thead>
-                          <tr className="border-b border-slate-100 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          <tr className="border-b border-stone-100 text-[10px] font-bold uppercase tracking-wide text-stone-400">
                             <th className="px-4 py-2 text-left">Artikal</th>
                             <th className="px-2 py-2 text-right">Početno</th>
                             <th className="px-2 py-2 text-right">Dodato</th>
@@ -644,7 +869,7 @@ export default function ReportDetail() {
                             <tr
                               key={item.key}
                               className={cx(
-                                'border-t border-slate-100',
+                                'border-t border-stone-100',
                                 item.missing && 'bg-amber-50/60',
                               )}
                             >
@@ -652,25 +877,25 @@ export default function ReportDetail() {
                                 <span
                                   className={cx(
                                     'font-medium',
-                                    item.missing ? 'text-stone-500' : 'text-slate-800',
+                                    item.missing ? 'text-stone-500' : 'text-stone-800',
                                   )}
                                 >
                                   {item.item_name}
                                 </span>
-                                <span className="ml-1.5 text-xs text-slate-400">{item.unit}</span>
+                                <span className="ml-1.5 text-xs text-stone-400">{item.unit}</span>
                                 {item.missing && (
                                   <span className="ml-2 text-[11px] font-semibold text-amber-700">
                                     nije popisano
                                   </span>
                                 )}
                               </td>
-                              <td className="px-2 py-2 text-right tabular-nums text-slate-500">
+                              <td className="px-2 py-2 text-right tabular-nums text-stone-500">
                                 {formatQty(item.qty_start)}
                               </td>
-                              <td className="px-2 py-2 text-right tabular-nums text-slate-500">
+                              <td className="px-2 py-2 text-right tabular-nums text-stone-500">
                                 {formatQty(item.qty_added)}
                               </td>
-                              <td className="px-2 py-2 text-right tabular-nums text-slate-500">
+                              <td className="px-2 py-2 text-right tabular-nums text-stone-500">
                                 {formatQty(item.qty_new)}
                               </td>
                               <td
@@ -680,12 +905,12 @@ export default function ReportDetail() {
                                     ? 'text-rose-600'
                                     : isUnsold(item)
                                       ? 'text-stone-300' // popisano, a nije prodato
-                                      : 'text-slate-900',
+                                      : 'text-stone-900',
                                 )}
                               >
                                 {formatQty(item.qty_sold)}
                               </td>
-                              <td className="px-4 py-2 text-right font-semibold tabular-nums text-slate-700">
+                              <td className="px-4 py-2 text-right font-semibold tabular-nums text-stone-700">
                                 {formatQty(item.qty_end)}
                               </td>
                             </tr>
@@ -700,10 +925,12 @@ export default function ReportDetail() {
           </div>
         )}
       </Card>
+        </>
+      )}
 
-      {/* ---------- Radnje vlasnika ---------- */}
+      {/* ---------- Radnje admina ---------- */}
       {isAdmin && (
-        <div className="fixed inset-x-0 bottom-[60px] z-20 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:safe-bottom">
+        <div className="fixed inset-x-0 bottom-[60px] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:safe-bottom">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
             {report.status !== 'potvrdjen' ? (
               <Button
@@ -751,11 +978,23 @@ export default function ReportDetail() {
 
       {!isAdmin && isOwner && report.status === 'vracen' && (
         <div className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-inset ring-rose-200">
-          Vlasnik je vratio ovaj popis na ispravku. Pošalji novi, ispravan popis za ovu smenu.
+          Admin je vratio ovaj popis na ispravku. Pošalji novi, ispravan popis za ovu smenu.
         </div>
       )}
 
       {/* ---------- Modali ---------- */}
+      <ReportPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title={`Preuzmi popis — ${formatDate(report.report_date)}`}
+        options={[
+          { key: 'obracun', label: lockedForWorker ? 'Podaci o smeni' : 'Obračun smene' },
+          { key: 'popis', label: 'Popis artikala' },
+          { key: 'napomene', label: 'Napomene' },
+        ]}
+        onConfirm={printReport}
+      />
+
       <Modal
         open={staffOpen}
         onClose={() => !working && setStaffOpen(false)}
@@ -771,7 +1010,7 @@ export default function ReportDetail() {
           </div>
         }
       >
-        <p className="mb-3 text-sm text-slate-600">
+        <p className="mb-3 text-sm text-stone-600">
           Svako označen dobija punu dnevnicu za ovu smenu.
         </p>
         <div className="space-y-1">
@@ -790,29 +1029,77 @@ export default function ReportDetail() {
                   'flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition',
                   on
                     ? 'border-brand-500 bg-brand-50'
-                    : 'border-slate-200 bg-white hover:bg-slate-50',
+                    : 'border-stone-200 bg-white hover:bg-stone-50',
                 )}
               >
                 <span
                   className={cx(
                     'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold',
-                    on ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-400',
+                    on ? 'bg-brand-600 text-white' : 'bg-stone-100 text-stone-400',
                   )}
                 >
                   {on ? '✓' : ''}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-800">
                   {w.full_name}
                 </span>
-                <span className="shrink-0 text-xs tabular-nums text-slate-500">
+                <span className="shrink-0 text-xs tabular-nums text-stone-500">
                   {formatMoney(w.daily_wage, false)}
                 </span>
               </button>
             )
           })}
           {allWorkers.length === 0 && (
-            <p className="py-6 text-center text-sm text-slate-500">Učitavanje…</p>
+            <p className="py-6 text-center text-sm text-stone-500">Učitavanje…</p>
           )}
+        </div>
+      </Modal>
+
+      {/* ================================================================ */}
+      {/*  Modal: umanjena dnevnica za ovaj dan                            */}
+      {/* ================================================================ */}
+      <Modal
+        open={!!wageEdit}
+        onClose={() => !working && setWageEdit(null)}
+        title={`Dnevnica — ${wageEdit?.name ?? ''}`}
+        size="sm"
+        footer={
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              disabled={working}
+              onClick={() => saveWage(null)}
+            >
+              Puna dnevnica
+            </Button>
+            <Button
+              className="flex-1"
+              loading={working}
+              disabled={wageEdit?.value === ''}
+              onClick={() => saveWage(parseNumber(wageEdit.value))}
+            >
+              Sačuvaj
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-stone-100 px-4 py-2.5">
+            <p className="eyebrow">Redovna dnevnica</p>
+            <p className="text-sm font-bold tabular-nums text-stone-900">
+              {formatMoney(wageEdit?.full ?? 0, false)}
+            </p>
+          </div>
+
+          <Field label="Za ovaj dan">
+            <MoneyInput
+              value={wageEdit?.value ?? ''}
+              onChange={(v) => setWageEdit((w) => ({ ...w, value: v }))}
+            />
+          </Field>
+
+          <p className="hint">Važi samo za {formatDate(report.report_date)}.</p>
         </div>
       </Modal>
 
@@ -876,7 +1163,7 @@ export default function ReportDetail() {
         <Field label="Šta treba ispraviti?" hint="Radnik će videti ovu poruku uz izveštaj.">
           <Textarea
             rows={4}
-            placeholder="npr. Fali stanje za točeno pivo i slika trake je mutna."
+            placeholder="npr. Fali stanje za točeno pivo i slika izveštaja je mutna."
             value={adminNote}
             onChange={(e) => setAdminNote(e.target.value)}
           />
@@ -899,7 +1186,7 @@ export default function ReportDetail() {
           </div>
         }
       >
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-stone-600">
           Popis odmah nestaje sa spiskova i iz obračuna, ali se čuva još{' '}
           <strong>12 sati</strong> — do tada možeš da ga vratiš u{' '}
           <strong>Pregled → Obrisani popisi</strong>. Posle toga se briše trajno, zajedno sa
@@ -910,12 +1197,12 @@ export default function ReportDetail() {
       {/* ---------- Uvećana slika ---------- */}
       {lightbox && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/90 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/90 p-4"
           onClick={() => setLightbox(null)}
         >
           <img
             src={lightbox}
-            alt="Izveštaj prodaje po operateru"
+            alt="Slika izveštaja sa kase i aparata za kartice"
             className="max-h-full max-w-full rounded-lg object-contain"
           />
           <button

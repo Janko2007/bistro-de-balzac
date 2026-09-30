@@ -50,7 +50,7 @@ export function ToastProvider({ children }) {
               'pointer-events-auto w-fit max-w-[340px] animate-slide-up rounded-[14px] px-3.5 py-2 text-center text-[13px] font-semibold leading-snug shadow-lg ring-1',
               t.type === 'success' && 'bg-emerald-600 text-white ring-emerald-700',
               t.type === 'error' && 'bg-rose-600 text-white ring-rose-700',
-              t.type === 'info' && 'bg-slate-900 text-white ring-slate-700',
+              t.type === 'info' && 'bg-stone-900 text-white ring-stone-700',
             )}
           >
             {t.message}

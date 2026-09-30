@@ -19,9 +19,9 @@ export function ProtectedRoute({ children, adminOnly = false }) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
         <div className="text-5xl">🔒</div>
-        <h1 className="text-xl font-bold text-slate-900">Nalog je deaktiviran</h1>
-        <p className="max-w-sm text-sm text-slate-600">
-          Tvoj nalog je privremeno isključen. Javi se vlasniku lokala.
+        <h1 className="text-xl font-bold text-stone-900">Nalog je deaktiviran</h1>
+        <p className="max-w-sm text-sm text-stone-600">
+          Tvoj nalog je privremeno isključen. Javi se adminu lokala.
         </p>
         <Button variant="secondary" onClick={signOut}>
           Odjavi se

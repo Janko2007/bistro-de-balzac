@@ -10,7 +10,7 @@ import { Button, Card, CardHeader, Field, Input, Modal, Textarea } from './ui'
  * Pravila i obaveze — pravilnik, dnevne obaveze, obaveze šankera i konobara.
  *
  * Svaki dokument se otvara klikom, kao kategorije u popisu.
- * Radnik ih samo čita (ekran Dnevnice). Sa `editable` vlasnik može da ih
+ * Radnik ih samo čita (ekran Dnevnice). Sa `editable` Admin može da ih
  * menja, dodaje nove, briše i menja im redosled (ekran Radnici).
  */
 export default function RuleDocs({ editable = false }) {
@@ -50,7 +50,7 @@ export default function RuleDocs({ editable = false }) {
   }
 
   /* ---------------------------------------------------------------- */
-  /*  Vlasnik: upis, brisanje, redosled                                */
+  /*  Admin: upis, brisanje, redosled                                */
   /* ---------------------------------------------------------------- */
   async function save(e) {
     e.preventDefault()

@@ -18,18 +18,19 @@ function timeLeft(deletedAt) {
 }
 
 /**
- * Obrisani popisi — korpa (samo vlasnik).
+ * Obrisani popisi — korpa (samo admin).
  *
  * Obrisan popis se ovde čuva 12 sati i može da se vrati. Pri svakom
  * otvaranju ekrana korpa se prazni od onoga što je starije od 12 sati:
  * baza trajno briše zapise i vraća putanje slika, koje se brišu iz storage-a.
- * Kartica se ne prikazuje dok je korpa prazna.
+ * Kartica je uvek na ekranu — i kad je korpa prazna, da admin zna gde je.
  */
 export default function ReportTrash({ onRestored }) {
   const toast = useToast()
   const [rows, setRows] = useState([])
   const [names, setNames] = useState({})
   const [busy, setBusy] = useState(null)
+  const [missing, setMissing] = useState(false) // baza još nema tabelu korpe
 
   const load = useCallback(async () => {
     const since = new Date(Date.now() - KEEP_MS).toISOString()
@@ -41,8 +42,11 @@ export default function ReportTrash({ onRestored }) {
 
     if (error) {
       console.error(error)
+      // Tabela ne postoji → SQL za korpu još nije pokrenut u Supabase-u.
+      setMissing(error.code === '42P01' || error.code === 'PGRST205' || /report_trash/.test(error.message ?? ''))
       return
     }
+    setMissing(false)
     setRows(data ?? [])
 
     const ids = [...new Set((data ?? []).map((r) => r.data?.report?.created_by).filter(Boolean))]
@@ -82,11 +86,18 @@ export default function ReportTrash({ onRestored }) {
     onRestored?.()
   }
 
-  if (rows.length === 0) return null
-
   return (
     <Card>
       <CardHeader title="Obrisani popisi" subtitle="Mogu da se vrate 12 sati od brisanja" />
+      {missing ? (
+        <p className="px-4 py-3.5 text-sm text-amber-800">
+          Korpa još nije uključena u bazi — u Supabase-u pokreni SQL iz uputstva za ažuriranje.
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="px-4 py-3.5 text-sm text-stone-500">
+          Korpa je prazna. Kad obrišeš popis, ovde se čuva 12 sati i može da se vrati.
+        </p>
+      ) : (
       <ul className="divide-y divide-stone-100">
         {rows.map((row) => {
           const r = row.data?.report ?? {}
@@ -116,6 +127,7 @@ export default function ReportTrash({ onRestored }) {
           )
         })}
       </ul>
+      )}
     </Card>
   )
 }

@@ -3,7 +3,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { categoryComparator } from '../lib/categories'
-import { Button, Card, CategoryToggle, Input, Stat, StatRow } from './ui'
+import { heading, printDocument, statGrid, table } from '../lib/print'
+import MonthPicker from './MonthPicker'
+import ReportPicker from './ReportPicker'
+import { Button, Card, CategoryToggle, Stat, StatRow } from './ui'
 import {
   countLabel,
   cx,
@@ -11,25 +14,11 @@ import {
   formatMonth,
   formatQty,
   monthRange,
-  parseDateInput,
   todayISO,
 } from '../lib/utils'
 
 /** "2026-09-15" → "2026-09" */
 const monthOf = (iso) => String(iso).slice(0, 7)
-
-/** "2026-09" → "09.2026" (kako se kuca u polje) */
-const monthText = (month) => {
-  const [y, m] = month.split('-')
-  return `${m}.${y}`
-}
-
-/** Mesec pomeren za `delta` meseci. */
-function shiftMonth(month, delta) {
-  const [y, m] = month.split('-').map(Number)
-  const d = new Date(y, m - 1 + delta, 1)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
 
 /**
  * Prodaja po artiklima za ceo mesec — koliko je čega prodato.
@@ -41,14 +30,13 @@ function shiftMonth(month, delta) {
 export default function ItemSalesReport({ items, categories }) {
   const toast = useToast()
 
-  const thisMonth = monthOf(todayISO())
-  const [month, setMonth] = useState(thisMonth)
-  const [text, setText] = useState(() => monthText(thisMonth))
+  const [month, setMonth] = useState(() => monthOf(todayISO()))
   const [sales, setSales] = useState(null) // null = učitava se
   const [shiftCount, setShiftCount] = useState(0)
   const [open, setOpen] = useState(false) // cela kartica zatvorena dok se ne klikne
   const [view, setView] = useState('kategorije') // 'kategorije' | 'najprodavanije'
   const [openCats, setOpenCats] = useState(() => new Set())
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -78,18 +66,6 @@ export default function ItemSalesReport({ items, categories }) {
       active = false
     }
   }, [month, toast])
-
-  /** Kucanje meseca: 09.2026, 9.2026, 2026-09 — ili bilo koji datum iz tog meseca. */
-  function applyText(value) {
-    setText(value)
-    const range = parseDateInput(value)
-    if (range) setMonth(monthOf(range.from))
-  }
-
-  function pick(m) {
-    setMonth(m)
-    setText(monthText(m))
-  }
 
   /* Svi artikli — i oni koji tog meseca nisu prodati (0). */
   const rows = useMemo(() => {
@@ -176,7 +152,71 @@ export default function ItemSalesReport({ items, categories }) {
     URL.revokeObjectURL(url)
   }
 
-  const bad = text.trim() !== '' && !parseDateInput(text)
+  /** Prodaja na papiru — `parts` bira šta ulazi. */
+  function printSales(parts) {
+    const has = (key) => parts.includes(key)
+
+    const columns = [
+      { label: 'Artikal' },
+      { label: 'Jed.', width: '10%' },
+      { label: 'Smena', align: 'right', width: '12%' },
+      { label: 'Prodato', align: 'right', width: '14%' },
+    ]
+
+    const bodyRows = []
+    for (const [cat, list] of grouped) {
+      const catTotal = list.reduce((s, r) => s + r.sold, 0)
+      bodyRows.push({ kind: 'group', label: cat, right: formatQty(catTotal) })
+      for (const r of list) {
+        bodyRows.push({
+          muted: r.sold === 0,
+          cells: [
+            r.name,
+            r.unit,
+            r.sold === 0 ? '—' : String(r.shifts),
+            { value: formatQty(r.sold), strong: r.sold > 0 },
+          ],
+        })
+      }
+    }
+    bodyRows.push({ kind: 'total', cells: ['Ukupno prodato', '', '', formatQty(total)] })
+
+    const topColumns = [
+      { label: '#', align: 'right', width: '7%' },
+      { label: 'Artikal' },
+      { label: 'Kategorija', width: '26%' },
+      { label: 'Prodato', align: 'right', width: '14%' },
+    ]
+    const topRows = ranked
+      .slice(0, 20)
+      .map((r, i) => [`${i + 1}.`, `${r.name} (${r.unit})`, r.category, formatQty(r.sold)])
+
+    printDocument({
+      title: 'Prodaja po artiklima',
+      subtitle: `${formatMonth(month)} · ${countLabel(shiftCount, 'smena')} zatvoreno`,
+      meta: [
+        { label: 'Mesec', value: formatMonth(month) },
+        { label: 'Prodato artikala', value: `${soldItems} od ${rows.length}` },
+      ],
+      content: [
+        has('zbir')
+          ? statGrid([
+              { label: 'Ukupno prodato', value: formatQty(total), sub: 'komada / jedinica' },
+              { label: 'Prodatih artikala', value: String(soldItems), sub: `od ${rows.length}` },
+              { label: 'Smena', value: String(shiftCount), sub: 'zatvorenih' },
+            ])
+          : '',
+        has('kategorije') ? heading('Po kategorijama') : '',
+        has('kategorije')
+          ? table({ columns, rows: bodyRows, empty: 'Za ovaj mesec nema prodaje.' })
+          : '',
+        has('najprodavanije') && topRows.length > 0 ? heading('Najprodavanije', 'prvih 20') : '',
+        has('najprodavanije') && topRows.length > 0
+          ? table({ columns: topColumns, rows: topRows })
+          : '',
+      ].join(''),
+    })
+  }
 
   return (
     <Card>
@@ -216,49 +256,33 @@ export default function ItemSalesReport({ items, categories }) {
 
       {open && (
       <>
+      {/* Šta ulazi u preuzet izveštaj */}
+      <ReportPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title={`Preuzmi prodaju — ${formatMonth(month)}`}
+        options={[
+          { key: 'zbir', label: 'Zbirni pregled' },
+          { key: 'kategorije', label: 'Po kategorijama' },
+          { key: 'najprodavanije', label: 'Najprodavanije' },
+        ]}
+        onConfirm={printSales}
+      />
+
       {/* ---------- Izbor meseca i prikaza ---------- */}
       <div className="space-y-3 border-y border-stone-100 px-4 py-3">
-        <div className="flex flex-wrap items-end gap-2">
-          <div>
-            <label className="label" htmlFor="sales-month">
-              Mesec
-            </label>
-            <Input
-              id="sales-month"
-              inputMode="numeric"
-              autoComplete="off"
-              value={text}
-              onChange={(e) => applyText(e.target.value)}
-              placeholder="09.2026"
-              className={cx('w-[130px]', bad && 'border-rose-400')}
-            />
-          </div>
-          <Button
-            variant={month === thisMonth ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => pick(thisMonth)}
-          >
-            Ovaj mesec
-          </Button>
-          <Button
-            variant={month === shiftMonth(thisMonth, -1) ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => pick(shiftMonth(thisMonth, -1))}
-          >
-            Prošli mesec
-          </Button>
-        </div>
-        {bad && (
-          <p className="text-xs font-medium text-rose-600">
-            Nije prepoznat mesec. Probaj 09.2026 ili 2026-09.
-          </p>
-        )}
+        <MonthPicker month={month} onChange={setMonth} />
 
         <div className="flex flex-wrap items-center gap-1.5">
           {rows.length > 0 && (
-            <Button variant="secondary" size="sm" className="order-last ml-auto" onClick={exportCsv}>
-              CSV
-            </Button>
+            <span className="order-last ml-auto flex items-center gap-1.5">
+              <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
+                Preuzmi
+              </Button>
+              <Button variant="secondary" size="sm" onClick={exportCsv}>
+                CSV
+              </Button>
+            </span>
           )}
           {[
             ['kategorije', 'Po kategorijama'],

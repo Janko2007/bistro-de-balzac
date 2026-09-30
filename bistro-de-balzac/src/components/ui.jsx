@@ -75,7 +75,7 @@ export function Spinner({ className = 'h-5 w-5' }) {
 
 export function FullPageLoader({ label = 'Učitavanje…' }) {
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-slate-500">
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-stone-500">
       <Spinner className="h-8 w-8 text-brand-600" />
       <p className="text-sm font-medium">{label}</p>
     </div>
@@ -93,19 +93,18 @@ export function Card({ className, children, ...props }) {
   )
 }
 
+/**
+ * Naslov kartice. `subtitle` je za podatak (koliko ih ima, koji period) —
+ * ne za objašnjenje šta kartica radi; to se vidi iz same kartice.
+ */
 export function CardHeader({ title, subtitle, action, className }) {
   return (
     <div
-      className={cx(
-        'flex items-start justify-between gap-3 border-b border-stone-100 px-4 py-3.5',
-        className,
-      )}
+      className={cx('flex items-center justify-between gap-3 px-4 pb-1 pt-4', className)}
     >
       <div className="min-w-0">
-        <h2 className="truncate text-[15px] font-semibold tracking-tight text-stone-900">
-          {title}
-        </h2>
-        {subtitle && <p className="mt-0.5 text-[13px] text-stone-500">{subtitle}</p>}
+        <h2 className="truncate text-[15px] font-bold tracking-tight text-stone-900">{title}</h2>
+        {subtitle && <p className="mt-0.5 truncate text-[12px] text-stone-400">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -125,7 +124,7 @@ export function Field({ label, hint, error, children, required, className }) {
         </label>
       )}
       {children}
-      {hint && !error && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+      {hint && !error && <p className="mt-1 text-xs text-stone-500">{hint}</p>}
       {error && <p className="mt-1 text-xs font-medium text-rose-600">{error}</p>}
     </div>
   )
@@ -163,7 +162,7 @@ export function MoneyInput({ value, onChange, ...props }) {
         placeholder="0"
         {...props}
       />
-      <span className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm font-semibold text-slate-400">
+      <span className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm font-semibold text-stone-400">
         RSD
       </span>
     </div>
@@ -178,7 +177,7 @@ export function Badge({ className, children }) {
     <span
       className={cx(
         'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
-        className ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',
+        className ?? 'bg-stone-100 text-stone-700 ring-stone-600/20',
       )}
     >
       {children}
@@ -191,10 +190,10 @@ export function Badge({ className, children }) {
 /* ------------------------------------------------------------------ */
 export function EmptyState({ icon = '📋', title, description, action }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
-      <div className="text-4xl">{icon}</div>
-      <h3 className="text-base font-bold text-slate-800">{title}</h3>
-      {description && <p className="max-w-sm text-sm text-slate-500">{description}</p>}
+    <div className="flex flex-col items-center justify-center gap-1.5 px-6 py-12 text-center">
+      <div className="mb-1 text-3xl opacity-60">{icon}</div>
+      <h3 className="text-[15px] font-bold text-stone-700">{title}</h3>
+      {description && <p className="max-w-[16rem] text-[13px] text-stone-400">{description}</p>}
       {action && <div className="mt-3">{action}</div>}
     </div>
   )
@@ -208,10 +207,30 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
     if (!open) return undefined
     const onKey = (e) => e.key === 'Escape' && onClose?.()
     document.addEventListener('keydown', onKey)
+
+    /* Pozadina se zaključava BEZ skoka na vrh: telo se „zamrzne“ tačno na
+       poziciji na kojoj si bio (position:fixed + negativan top), a pri
+       zatvaranju se skrol vrati na isto mesto. Samo `overflow:hidden` bi te
+       na telefonu izbacilo na vrh strane. */
+    const y = window.scrollY
+    const saved = {
+      overflow: document.body.style.overflow,
+      position: document.body.style.position,
+      top: document.body.style.top,
+      width: document.body.style.width,
+    }
     document.body.style.overflow = 'hidden'
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${y}px`
+    document.body.style.width = '100%'
+
     return () => {
       document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = ''
+      document.body.style.overflow = saved.overflow
+      document.body.style.position = saved.position
+      document.body.style.top = saved.top
+      document.body.style.width = saved.width
+      window.scrollTo(0, y)
     }
   }, [open, onClose])
 
@@ -220,7 +239,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
       <div
-        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -228,19 +247,19 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
         role="dialog"
         aria-modal="true"
         className={cx(
-          'relative z-10 max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-2xl animate-slide-up sm:rounded-2xl',
+          'relative z-10 max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-white shadow-2xl animate-slide-up sm:rounded-3xl',
           size === 'sm' && 'sm:max-w-sm',
           size === 'md' && 'sm:max-w-lg',
           size === 'lg' && 'sm:max-w-3xl',
           size === 'xl' && 'sm:max-w-5xl',
         )}
       >
-        <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-          <h2 className="text-base font-bold text-slate-900">{title}</h2>
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-100 bg-white px-4 py-3.5">
+          <h2 className="text-[15px] font-bold tracking-tight text-stone-900">{title}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            className="rounded-lg p-1.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
             aria-label="Zatvori"
           >
             <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -250,7 +269,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
         </div>
         <div className="px-4 py-4">{children}</div>
         {footer && (
-          <div className="sticky bottom-0 border-t border-slate-200 bg-white px-4 py-3 safe-bottom">
+          <div className="sticky bottom-0 border-t border-stone-200 bg-white px-4 py-3 safe-bottom">
             {footer}
           </div>
         )}
@@ -270,12 +289,12 @@ export function CategoryToggle({ title, open, onToggle, right, children }) {
       aria-expanded={open}
       className={cx(
         'flex w-full items-center gap-2.5 px-4 py-3 text-left transition',
-        open ? 'bg-slate-100' : 'bg-slate-50 hover:bg-slate-100',
+        open ? 'bg-stone-100' : 'bg-stone-50 hover:bg-stone-100',
       )}
     >
       <svg
         className={cx(
-          'h-4 w-4 shrink-0 text-slate-400 transition-transform',
+          'h-4 w-4 shrink-0 text-stone-400 transition-transform',
           open && 'rotate-90',
         )}
         viewBox="0 0 24 24"
@@ -289,7 +308,7 @@ export function CategoryToggle({ title, open, onToggle, right, children }) {
         <path d="M9 18l6-6-6-6" />
       </svg>
 
-      <span className="min-w-0 flex-1 truncate text-xs font-bold uppercase tracking-wide text-slate-600">
+      <span className="min-w-0 flex-1 truncate text-xs font-bold uppercase tracking-wide text-stone-600">
         {title}
       </span>
 
@@ -303,27 +322,28 @@ export function CategoryToggle({ title, open, onToggle, right, children }) {
 /*  Statistička pločica                                                */
 /* ------------------------------------------------------------------ */
 /**
- * Pločica sa brojem. Bez okvira i bez boje — hijerarhiju nosi veličina slova,
- * a ne šarenilo. Ako je broj zaista važan, pošalji `tone="total"`.
+ * Pločica sa brojem. Jedna boja na ekranu — narandžasta ide samo na broj koji
+ * je zaista glavni (`tone="total"`), sve ostalo je crno. Manje šarenila, brže
+ * se čita. `sub` je za retke slučajeve; RSD se podrazumeva i ne piše se.
  */
 export function Stat({ label, value, sub, tone = 'default' }) {
   const tones = {
     default: 'text-stone-900',
-    cash: 'text-emerald-700',
-    card: 'text-sky-700',
-    expense: 'text-rose-700',
-    total: 'text-brand-700',
+    cash: 'text-stone-900',
+    card: 'text-stone-900',
+    expense: 'text-rose-600',
+    total: 'text-brand-600',
   }
 
   return (
-    <div className="flex min-w-0 flex-col items-center px-3 py-2.5 text-center">
+    <div className="flex min-w-0 flex-col items-center px-3 py-3 text-center">
       {/* Naslov se prelama u dva reda umesto da se seče, a `min-h` drži
           dvoredni prostor i kad je naslov kratak — tako svi brojevi u nizu
           stoje na istoj liniji. */}
       <p className="eyebrow min-h-[26px] leading-tight">{label}</p>
       <p
         className={cx(
-          'text-[17px] font-bold tabular-nums tracking-tight sm:text-[20px]',
+          'text-[18px] font-bold tabular-nums tracking-tight sm:text-[21px]',
           tones[tone] ?? tones.default,
         )}
       >
@@ -339,7 +359,7 @@ export function StatRow({ className, children }) {
   return (
     <div
       className={cx(
-        'grid divide-x divide-y divide-stone-100 overflow-hidden rounded-2xl border border-stone-200 bg-white',
+        'grid divide-x divide-y divide-stone-100 overflow-hidden rounded-3xl border border-stone-200/70 bg-white shadow-[0_1px_2px_rgba(28,25,23,0.04)]',
         '[&>*]:min-w-0 [&>*]:border-0',
         className,
       )}

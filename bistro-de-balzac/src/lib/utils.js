@@ -1,14 +1,39 @@
-/** Nazivi smena za prikaz. */
+/**
+ * Smene idu redom kako se i rade: prva, pa međusmena preko nje i druge, pa
+ * druga. Taj redosled je isti svuda — u izboru smene, u Pregledu i u štampi.
+ */
 export const SHIFTS = [
   { value: 'prva', label: 'Prva smena', hint: 'jutarnja' },
+  { value: 'medjusmena', label: 'Međusmena', hint: 'preko prve i druge' },
   { value: 'druga', label: 'Druga smena', hint: 'večernja' },
-  { value: 'medjusmena', label: 'Međusmena', hint: 'između' },
 ]
 
 export const SHIFT_LABELS = {
   prva: 'Prva smena',
   druga: 'Druga smena',
   medjusmena: 'Međusmena',
+}
+
+/** Kratko ime — za uske trake i oznake gde „smena“ samo zauzima mesto. */
+export const SHIFT_SHORT = {
+  prva: 'Prva',
+  medjusmena: 'Među',
+  druga: 'Druga',
+}
+
+/** Međusmena je narandžasta jer stoji preko obe — odmah se razlikuje. */
+export const SHIFT_STYLES = {
+  prva: 'bg-stone-100 text-stone-600 ring-stone-500/15',
+  medjusmena: 'bg-brand-50 text-brand-700 ring-brand-600/20',
+  druga: 'bg-stone-100 text-stone-600 ring-stone-500/15',
+}
+
+const SHIFT_ORDER = ['prva', 'medjusmena', 'druga']
+
+/** Za sortiranje smena unutar jednog dana. */
+export function shiftRank(shift) {
+  const i = SHIFT_ORDER.indexOf(shift)
+  return i === -1 ? SHIFT_ORDER.length : i
 }
 
 export const STATUS_LABELS = {
@@ -261,7 +286,7 @@ export function loginEmail(name) {
 
 /**
  * Šta je korisnik ukucao u polje za prijavu?
- * Ako je upisao email — koristi se kao takav (vlasnikov nalog iz Supabase panela).
+ * Ako je upisao email — koristi se kao takav (adminov nalog iz Supabase panela).
  * Inače se tretira kao puno ime i pretvara u adresu za prijavu.
  */
 export function resolveLogin(input) {
@@ -286,7 +311,7 @@ export function errorMessage(error, fallback = 'Došlo je do greške. Pokušaj p
   const msg = error.message || error.error_description || ''
   const map = {
     'Invalid login credentials': 'Pogrešno ime ili lozinka.',
-    'Email not confirmed': 'Nalog nije potvrđen. Javi se vlasniku.',
+    'Email not confirmed': 'Nalog nije potvrđen. Javi se adminu.',
     'Failed to fetch': 'Nema internet konekcije ili je server nedostupan.',
     'User already registered': 'Korisnik sa ovim emailom već postoji.',
   }

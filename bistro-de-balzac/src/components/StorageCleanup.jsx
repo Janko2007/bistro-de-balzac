@@ -23,7 +23,7 @@ function monthsAgo(months) {
 }
 
 /**
- * Održavanje prostora (samo vlasnik).
+ * Održavanje prostora (samo admin).
  * Slike izveštaja su jedino što s vremenom raste — brojevi iz popisa
  * zauzimaju zanemarljivo malo i nikad se ne brišu.
  */
@@ -134,14 +134,14 @@ export default function StorageCleanup() {
           subtitle={`${countLabel(total, 'slika')} · ~${usedMb.toFixed(0)} MB od 1 GB besplatno`}
         />
         <div className="space-y-3 p-4">
-          <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+          <div className="h-2 overflow-hidden rounded-full bg-stone-200">
             <div
               className={percent > 80 ? 'h-full bg-rose-500' : 'h-full bg-emerald-500'}
               style={{ width: `${Math.max(percent, 2)}%` }}
             />
           </div>
 
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-stone-600">
             Slike izveštaja su jedino što s vremenom raste. Brojevi iz popisa — pazar, stanja,
             dnevnice — zauzimaju zanemarljivo malo i <strong>nikad se ne brišu</strong>.
             {oldest && ` Najstariji izveštaj je od ${formatDate(oldest)}.`}
@@ -196,16 +196,16 @@ export default function StorageCleanup() {
           </div>
         }
       >
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-stone-600">
           Briše se <strong>{oldCount}</strong> slika iz izveštaja pre{' '}
           <strong>{formatDate(cutoff)}</strong>. Oslobađa se oko{' '}
           <strong>{Math.round((oldCount * KB_PER_IMAGE) / 1024)} MB</strong>.
         </p>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-sm text-stone-600">
           Sami izveštaji — pazar, popis po artiklima i dnevnice — <strong>ostaju netaknuti</strong>.
           Nestaju samo fotografije.
         </p>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-stone-500">
           Ovo briše kopiju koja stoji u aplikaciji. Originalni fiskalni podaci ostaju tamo gde ih
           inače čuvaš.
         </p>

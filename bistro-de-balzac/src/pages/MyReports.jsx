@@ -202,9 +202,8 @@ export default function MyReports() {
               )}
             </div>
             {searchInvalid && (
-              <p className="mt-1.5 text-xs font-medium text-rose-600">
-                Nije prepoznat datum. Probaj <strong>15</strong>, <strong>15.09</strong>,{' '}
-                <strong>15.09.2026</strong> ili <strong>09.2026</strong> za ceo mesec.
+              <p className="mt-1.5 text-[12px] font-medium text-rose-600">
+                Probaj 15 · 15.09 · 15.09.2026 · 09.2026
               </p>
             )}
           </div>
@@ -216,16 +215,12 @@ export default function MyReports() {
               <Spinner className="h-6 w-6 text-brand-600" />
             </div>
           ) : dateSearch ? (
-            <EmptyState
-              icon="🔍"
-              title="Nema izveštaja"
-              description="Za traženi datum nemaš nijednu smenu."
-            />
+            <EmptyState icon="🔍" title="Nema izveštaja" />
           ) : (
             <EmptyState
               icon="📝"
               title="Još nema poslatih popisa"
-              description="Kad završiš smenu, popuni popis i pošalji ga vlasniku."
+              description="Pošalji popis kad završiš smenu."
               action={
                 <Link to="/novi-popis">
                   <Button>Popuni prvi popis</Button>
@@ -234,7 +229,7 @@ export default function MyReports() {
             />
           )
         ) : (
-          <div className={cx('divide-y divide-slate-100 transition', fetching && 'opacity-60')}>
+          <div className={cx('divide-y divide-stone-100 transition', fetching && 'opacity-60')}>
             {/* Samo datum, smena i stanje — iznosi se vide kad se izveštaj otvori. */}
             {reports.map((report) => (
               <ReportListItem key={report.id} report={report} compact />

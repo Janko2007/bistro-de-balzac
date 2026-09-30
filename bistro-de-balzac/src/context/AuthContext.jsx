@@ -14,7 +14,7 @@ export function AuthProvider({ children }) {
     const { data, error } = await supabase
       .from('profiles')
       .select(
-        'id, email, full_name, phone, role, daily_wage, is_active, is_deleted, avatar_path, created_at',
+        'id, email, full_name, phone, role, pay_model, daily_wage, monthly_salary, percent, is_active, is_deleted, avatar_path, created_at',
       )
       .eq('id', userId)
       .maybeSingle()
@@ -66,8 +66,14 @@ export function AuthProvider({ children }) {
 
   /** `username` je puno ime radnika (ili email, za naloge iz Supabase panela). */
   const signIn = useCallback(async (username, password) => {
+    let email = null
+    if (!username.includes('@')) {
+      // Mejl naloga se traži po imenu — radi i kad je admin radnika preimenovao.
+      const { data } = await supabase.rpc('login_email', { p_name: username })
+      if (typeof data === 'string' && data) email = data
+    }
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: resolveLogin(username),
+      email: email ?? resolveLogin(username),
       password,
     })
     return { data, error }

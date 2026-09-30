@@ -1,7 +1,7 @@
 # Bistro de Balzac — PWA za vođenje smena
 
 Aplikacija za evidenciju smena u lokalu: radnici unose popis artikala, pazar
-(gotovina + kartice), troškove iz kase i slikaju traku sa kase. Vlasnik sve to
+(gotovina + kartice), troškove iz kase i slikaju traku sa kase. Admin sve to
 vidi na jednom mestu i potvrđuje popise.
 
 Radi na telefonu i računaru, instalira se na početni ekran (PWA) — **bez Google
@@ -97,7 +97,7 @@ bistro-de-balzac/
 
 Ovim si dobio:
 - tabele `profiles`, `items`, `shift_reports`, `shift_report_staff`, `shift_report_items`, `report_images`
-- sva RLS pravila (radnik vidi samo svoje, vlasnik vidi sve)
+- sva RLS pravila (radnik vidi samo svoje, admin vidi sve)
 - storage bucket `izvestaji` za slike traka sa kase
 - **102 artikla Bistroa de Balzac**, razvrstana u 20 kategorija (kafa, čaj, cedevita,
   ceđeni sokovi, sokovi, voda, gazirana pića, energetska pića, pivo, vino, rakija, viski,
@@ -113,7 +113,7 @@ Ovim si dobio:
 
 ```sql
 update public.profiles
-set role = 'admin', full_name = 'Vlasnik'
+set role = 'admin', full_name = 'Admin'
 where email = 'tvoj-email@primer.com';
 ```
 
@@ -211,7 +211,7 @@ Domen je izmišljen, na njega se ništa ne šalje i radnik ga nikad ne vidi. Zat
 
 - **ime i prezime mora biti jedinstveno** — baza to i proverava (unikatni indeks);
   ako imaš dva Marka Markovića, dodaj srednje slovo;
-- kad vlasnik promeni radniku ime, menja mu se i korisničko ime za prijavu — app
+- kad admin promeni radniku ime, menja mu se i korisničko ime za prijavu — app
   te na to upozori;
 - tvoj vlasnički nalog, koji si napravio iz Supabase panela, radi i dalje — možeš
   se prijaviti i punim imenom i svojim pravim emailom.
@@ -296,16 +296,20 @@ i ponaša se kao prava aplikacija.
 ## 📖 Kako se koristi
 
 ### Radnik (konobar / šanker)
-1. Prijavi se **imenom i prezimenom** i lozinkom koju je dobio od vlasnika.
-2. **Novi popis**: izabere datum i smenu (prva / druga / međusmena). Dugme ispod se samo
-   menja prema tome šta zatekne:
+1. Prijavi se **imenom i prezimenom** i lozinkom koju je dobio od admina.
+2. **Novi popis**: izabere datum, pa smenu — tri dugmeta **Prva · Među · Druga**.
+   Dugme ispod se samo menja prema tome šta zatekne:
    - **Otvori smenu** — za tu smenu još nema popisa, pravi se novi;
    - **Uđi u smenu** — neko je već otvorio tu smenu; iznad dugmeta piše **ko je unutra**,
      pa ulaskom nastavlja na istom popisu;
    - smena koja je već **zatvorena** — dugme je isključeno i piše zašto.
 
-   Tek time počinje popis. **Ko uđe u smenu, tome se računa dnevnica za nju** — nikog
-   drugog ne može da upiše, samo sebe.
+   Tek time počinje popis. Nikog drugog ne može da upiše, samo sebe.
+
+   **Može da bude u više smena istog dana** — ko radi međusmenu ulazi i u prvu i u
+   drugu. Svaka smena ima svoj popis, a smena u kojoj već jeste nosi kvačicu na
+   svom dugmetu; klikom na drugo dugme prelazi na njen popis. **Dnevnica se i
+   dalje računa po danu — dve smene istog dana su jedna dnevnica.**
 3. Unese **pazar** i **kartice** sa trake — **predato** (gotovina koju predaje)
    aplikacija računa sama: *pazar − kartice*. Kartice ne mogu biti veće od pazara.
    Uz polja stoji upozorenje da se upisuju **tačni iznosi, bez zaokruživanja**.
@@ -318,16 +322,19 @@ i ponaša se kao prava aplikacija.
 
    U bazi se i dalje čuva krajnje stanje (`qty_end`), a prodato baza izračuna sama —
    zato svi izveštaji, zbirovi i *Prodaja po artiklima* rade kao i pre.
-5. **Slika izveštaj prodaje po operateru** — **obavezno**, do 6 slika. Slike se
-   automatski smanjuju pre slanja.
+5. **Slika izveštaja** — **obavezno**, do 6 slika, automatski se smanjuju pre slanja.
+   Na **istoj slici** moraju da budu dva izveštaja, jedan pored drugog:
+   **izveštaj prodaje po operateru** sa kase i izveštaj sa **aparata za kartice** —
+   *ukupan izveštaj* na kraju prve smene i međusmene, a *kraj dana* na kraju druge.
+   Tako se odmah vidi da se kartice sa kase i sa aparata poklapaju.
 6. Upiše **napomenu za admina** ako ima nešto da javi (opciono, na dnu strane).
 7. **Zatvori smenu**. Pre slanja iskoči **obračun smene**: pazar, kartice i —
    krupno — **Predato**, tj. gotovina koju radnik fizički predaje. Tek potvrdom se
-   popis šalje vlasniku.
+   popis šalje adminu.
 
 Smena **ne može da se zatvori**:
 
-- bez slike izveštaja prodaje po operateru;
+- bez slike izveštaja (prodaja po operateru + aparat za kartice);
 - ako je nekom artiklu upisano **početno stanje, a nije prodato** — red požuti i piše
   *„Fali prodato“*, a u zaglavlju popisa stoji koliko ih je. Klik na
   *Zatvori smenu* odmah otvori kategorije u kojima ti artikli stoje;
@@ -359,20 +366,21 @@ smena), ne pravi se novi popis — pridružuje se postojećem:
 - **oba vide iste brojeve, uživo.** Što jedan upiše, drugom se pojavi za sekundu, bez
   osvežavanja. Polje koje trenutno kucaš se ne dira, pa ti se unos ne vraća unazad;
 - **oba mogu da menjaju sve** — i ono što je upisao onaj drugi;
-- **oba dobijaju punu dnevnicu** za tu smenu;
+- **oba dobijaju punu dnevnicu** za taj dan;
 - gore piše **ko je u smeni**, sa imenima.
 
 Popis se čuva **u bazu dok kucaš** (nema više dugmeta „sačuvaj“) — gore desno piše
 *Čuva se… / Sačuvano*. Ako se telefon ugasi ili se aplikacija zatvori, sledeći put te
-vraća pravo u tu istu otvorenu smenu.
+vraća pravo u tu istu otvorenu smenu. Ako ih ima više otvorenih (međusmena), vraća
+te u poslednju, a na ostale prelaziš dugmadima smena.
 
 Ako je neko ušao u pogrešnu smenu, ima dugme **Izađi iz smene** — skida se sa spiska i
 dnevnica mu se za nju ne računa. Popis ostaje ostalima.
 
 U smenu se može ući **samo dok je otvorena**. Kad se jednom zatvori, niko se ne može
-naknadno ubaciti i tako „pokupiti“ dnevnicu. Ispravke posle toga radi vlasnik.
+naknadno ubaciti i tako „pokupiti“ dnevnicu. Ispravke posle toga radi admin.
 
-### Vlasnik (admin)
+### Admin
 - **Pregled**: otvara se na **juče i danas** — samo ono što te trenutno zanima.
   Na vrhu je **Filteri** kao padajući meni (period, smena, status, radnik); dok je
   zatvoren, u jednom redu piše šta je trenutno izabrano. Ispod su zbirne sume predatog
@@ -391,7 +399,7 @@ naknadno ubaciti i tako „pokupiti“ dnevnicu. Ispravke posle toga radi vlasni
   Poruka se **potpisuje tvojim imenom** (radnik vidi „Poruka · Nikola Ivković“), a ime
   upisuje baza — niko se ne može potpisati tuđim. Prazno polje briše poruku.
 - **Ko je radio**: spisak se puni sam — upisuje se svako ko je ušao u smenu. Dugmetom
-  *Izmeni* vlasnik može da ispravi spisak (doda nekog ko je zaboravio da uđe ili skine
+  *Izmeni* admin može da ispravi spisak (doda nekog ko je zaboravio da uđe ili skine
   nekog ko je ušao greškom). Po tom spisku se računaju dnevnice.
 - **Artikli → Prodaja po artiklima** (na vrhu ekrana): koliko je čega prodato u
   mesecu, zbir iz svih zatvorenih smena. Mesec se kuca (`09.2026`) ili bira sa
@@ -424,11 +432,11 @@ prepisani iz Word dokumenata (na latinici).
 - **Radnik** ih vidi na ekranu **Profil** (ikonica čovečuljka), na dnu — ispod svojih
   podataka (ime, telefon, uloga, dnevnica) i ispod dnevnica. Svaki dokument je zatvoren
   dok se ne klikne na naslov. U *Dnevnim obavezama* današnji dan je označen sa **danas**.
-- **U popisu smene**, ispod *Izveštaja prodaje po operateru*, stoji kartica **Dnevna
+- **U popisu smene**, ispod *Slike izveštaja*, stoji kartica **Dnevna
   obaveza — (dan)** sa obavezama baš za taj dan i štiklom *„Dnevna obaveza za ovu smenu
-  je urađena“*. Štikla se deli sa kolegom u smeni, a vlasnik u izveštaju vidi
+  je urađena“*. Štikla se deli sa kolegom u smeni, a admin u izveštaju vidi
   *urađena* / *nije štiklirana*. Zatvaranje smene nije uslovljeno njome.
-- **Vlasnik** ih uređuje na dnu ekrana **Radnici**: otvori dokument → *Izmeni*, *▲▼* za
+- **Admin** ih uređuje na dnu ekrana **Radnici**: otvori dokument → *Izmeni*, *▲▼* za
   redosled, *Obriši*; a **+ Novi** dodaje novi dokument.
 
 Tekst se piše kao običan tekst, uz tri znaka na početku reda:
@@ -459,7 +467,8 @@ ponedeljka ili petka**. Tako to i računa aplikacija — nigde nije potrebno nab
 Na ekranu **Uplate** stoji:
 
 - **Za uplatu** — ukupna gotovina koja još nije uplaćena.
-- **Dospelo** — deo toga kome je dan uplate već stigao (ovo je iznos koji kasni).
+- **Rok stigao** — deo toga kome je dan uplate već došao (danas ili ranije). To je
+  iznos koji ide u banku odmah; ostatak čeka svoj ponedeljak ili petak.
 - **Sledeća uplata** — prvi sledeći ponedeljak ili petak.
 - **Uplaćeno ovog meseca** — zbir uplata u tekućem mesecu.
 
@@ -494,18 +503,48 @@ pokaže taj period. Radi isto na telefonu, tabletu i računaru; prihvata `16`,
 `16.09` ili `16.09.2026`.
 
 ```
-zarađeno   = broj odrađenih smena × dnevnica
+zarađeno   = broj odrađenih DANA × dnevnica
 za isplatu = zarađeno + bonusi − isplaćeno
 ```
 
-Smena se broji svakome ko je u njoj upisan — ako rade dvoje, oboje dobijaju punu
-dnevnicu. Vraćeni izveštaji se ne broje dok se ne isprave.
+Dan se broji svakome ko je tog dana bio upisan u smenu — ako rade dvoje, oboje
+dobijaju punu dnevnicu. **Dnevnica ide po danu, a ne po smeni**: ko radi
+međusmenu ulazi i u prvu i u drugu, ali mu se taj dan računa kao *jedna*
+dnevnica. Vraćeni izveštaji se ne broje dok se ne isprave.
+
+### Dnevnica, plata i procenat
+
+Svaki radnik ima **način plaćanja** (`profiles.pay_model`):
+
+| Način | Osnova za period |
+| --- | --- |
+| `dnevnica` | broj odrađenih **dana** × `daily_wage` |
+| `plata` | `monthly_salary ÷ 2` (period je pola meseca) |
+
+**Umanjena dnevnica za jedan dan.** Na izveštaju, u *U smeni radili*, admin uz
+svakog radnika ima dugme **Umanji** — upiše iznos koji važi samo za taj dan
+(npr. radnik je došao kasnije). Čuva se u `shift_report_staff.wage_override`;
+prazno znači puna dnevnica. Ako je tog dana bio u dve smene, važi najmanji
+upisani iznos — dan je i dalje jedna dnevnica. Radnik taj iznos vidi u
+*Dnevnice* uz tu smenu, ali ne može da ga menja (politika `staff_update`).
+
+Uz oba ide i opcioni **procenat** (`profiles.percent`): `pazar njegovih smena ×
+procenat`, gde je pazar zbir `total_amount` smena koje je radio u tom periodu.
+Procenat se računa od **svih** smena — i kad ih je dve u istom danu — jer je
+radio u obe; jedino se dnevnica ograničava na jednu po danu.
+
+    zarađeno   = osnova + procenat
+    za isplatu = zarađeno + bonusi − isplaćeno
+
+Sve to računa `settle()` u `src/lib/earnings.js`, a admin menja u
+**Radnici → Izmeni**. Radnik sebi ne može da promeni ni jedno od toga — čuva
+ih okidač `guard_profile_update`.
 
 > Isplate se u bazi vezuju za **ključ perioda** (`payouts.period_key`, npr.
 > `2026-09-A`), a ne za datum isplate — jer se isplata dešava *posle* perioda, pa bi
 > po datumu upala u pogrešan obračun.
 
-Vlasnik vidi zbir za sve radnike i po svakom pojedinačno, pa ima dva dugmeta:
+Admin vidi zbir za sve radnike i po svakom pojedinačno, pa ima dva dugmeta:
 
 - **💵 Isplati** — upisuje isplatu (umanjuje dug prema radniku),
 - **🎁 Bonus** — dodaje bonus **na platu** (uvećava dug prema radniku).
@@ -513,6 +552,20 @@ Vlasnik vidi zbir za sve radnike i po svakom pojedinačno, pa ima dva dugmeta:
 Oboje se upisuju u istu tabelu `payouts`, razlikuje ih kolona `kind`. Radnik isti
 taj obračun vidi na svom ekranu **Profil**, sa spiskom svojih smena, bonusa i
 isplata.
+
+### Potvrđen popis je za radnika zaključan
+
+Kad admin potvrdi popis (`status = 'potvrdjen'`), radniku u tom izveštaju
+ostaju samo **datum i smena**, rečenica *„Popis je potvrđen — iznose od sada
+vidi samo admin"*, **U smeni radili** i **Dnevna obaveza**. Pazar, kartice i
+predato, popis artikala, slike, napomene i dugme *Preuzmi* se sakrivaju
+(`lockedForWorker` u `ReportDetail.jsx`).
+
+Dok je popis otvoren, poslat ili vraćen na ispravku, radnik vidi sve — sam ga je
+i popunio.
+
+> Ovo je pravilo prikaza u aplikaciji, ne u bazi. Spisak *Moji izveštaji* ionako
+> nikad ne prikazuje iznose, a dnevnice i bonusi se prikazuju normalno.
 
 ### Brisanje popisa
 
@@ -522,6 +575,26 @@ ali se čuva još **12 sati** u **Pregled → Obrisani popisi**, odakle se vrać
 jednim klikom (**Vrati**). Posle 12 sati se briše trajno, zajedno sa slikama
 (tabela `report_trash`, funkcije `trash_report`, `restore_report`,
 `purge_report_trash`).
+
+### Štampa i PDF
+
+Svaki izveštaj može da se odštampa ili sačuva kao PDF — dugme **Štampaj**:
+
+| Ekran | Šta se štampa |
+| --- | --- |
+| Pregled → *Izveštaji smena* | smene iz izabranog perioda, grupisane po danima, sa zbirom |
+| Pregled → jedan izveštaj | ceo popis smene: obračun, ko je radio, sve stavke, napomene |
+| Uplate | šta čeka polog (po danima uplate) i istorija uplaćenog |
+| Artikli → *Prodaja po artiklima* | prodaja za mesec po kategorijama + 20 najprodavanijih |
+| Artikli → *Štampaj popis* | prazan obrazac za ručni popis (rezerva kad nema neta) |
+| Radnici → *Obračun dnevnica* | svi radnici sa obračunom i mestom za potpis |
+
+Sve to radi `src/lib/print.js`: pravi običnu HTML stranicu sa zajedničkim
+izgledom (`statGrid`, `heading`, `table`, `textBlock`, `blankFields`), otvara je
+u novom prozoru i poziva `window.print()`. PDF pravi sam pregledač — bez dodatne
+biblioteke, sa ispravnim našim slovima, prelomom strana i zaglavljem tabele koje
+se ponavlja na svakoj strani. Ako je pregledač blokirao novi prozor, štampa ide
+iz skrivenog okvira u samoj stranici.
 
 ### Brisanje radnika
 
@@ -534,7 +607,7 @@ Za privremeno isključivanje koristi *Deaktiviraj*.
 ## 🔐 Bezbednost (kako je rešeno)
 
 - **RLS je uključen na svim tabelama.** Radnik čita i menja samo izveštaje koje je
-  sam poslao ili u kojima je bio u smeni; vlasnik vidi sve.
+  sam poslao ili u kojima je bio u smeni; admin vidi sve.
 - **Zatvoren izveštaj je zaključan** — radnik ga menja samo dok je smena otvorena ili
   dok je vraćena na ispravku (`status in ('otvoren','vracen')` u RLS politici, ne samo
   u interfejsu).
@@ -544,11 +617,11 @@ Za privremeno isključivanje koristi *Deaktiviraj*.
 - **Tuđa smena se ne vidi dok joj se ne pridružiš.** Da bi ekran ipak znao da li piše
   „Otvori smenu“ ili „Uđi u smenu“, postoji funkcija `peek_shift` — ona vraća samo
   status smene i imena onih koji su u njoj, bez pazara i bez popisa.
-- **Poruku vlasnika potpisuje baza.** Aplikacija šalje samo tekst — ime i vreme dopisuje
+- **Poruku admina potpisuje baza.** Aplikacija šalje samo tekst — ime i vreme dopisuje
   trigger `stamp_verification` iz `auth.uid()`, pa se niko ne može potpisati tuđim imenom.
 - **Radnik ne može sam sebi da promeni ulogu** — trigger `guard_profile_update`
   vraća `role` i `is_active` na staru vrednost ako izmenu ne radi admin.
-- **Uplate pazara vidi samo vlasnik** — tabele `cash_deposits` i `cash_deposit_days`
+- **Uplate pazara vidi samo admin** — tabele `cash_deposits` i `cash_deposit_days`
   imaju politiku koja traži `is_admin()` i za čitanje i za upis.
 - **Bucket `izvestaji` je privatan.** Slike se otvaraju samo preko potpisanog URL-a
   koji važi 2 sata; bez prijave se ništa ne vidi.

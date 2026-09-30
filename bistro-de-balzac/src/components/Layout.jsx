@@ -1,5 +1,5 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { APP_NAME } from '../lib/supabaseClient'
 import { cx } from '../lib/utils'
@@ -39,10 +39,40 @@ function Icon({ path, className = 'h-5 w-5' }) {
   )
 }
 
+/**
+ * Pamti dokle si skrolovao na svakom ekranu.
+ *
+ * Povratak nazad (npr. iz otvorenog izveštaja na spisak) vraća te tačno tamo
+ * gde si stao, a otvaranje novog ekrana kreće od vrha.
+ */
+function useScrollMemory() {
+  const location = useLocation()
+  const navType = useNavigationType()
+  const positions = useRef(new Map())
+
+  useEffect(() => {
+    const key = location.key
+    const saved = positions.current.get(key)
+
+    if (navType === 'POP' && typeof saved === 'number') {
+      // Sadržaj se tek iscrtava — skrol se vraća u sledećem kadru.
+      requestAnimationFrame(() => window.scrollTo(0, saved))
+    } else {
+      window.scrollTo(0, 0)
+    }
+
+    return () => {
+      positions.current.set(key, window.scrollY)
+    }
+  }, [location.key, navType])
+}
+
 export default function Layout() {
   const { profile, isAdmin, signOut } = useAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
+
+  useScrollMemory()
 
   const navItems = isAdmin
     ? [
@@ -67,7 +97,7 @@ export default function Layout() {
   return (
     // Dole ima mesta za donju navigaciju — na iPhone-u i za prostor iznad
     // crte za gašenje aplikacije, da poslednja kartica ne ostane ispod nje.
-    <div className="min-h-screen bg-slate-100 pb-[calc(76px+env(safe-area-inset-bottom,0px))] lg:pb-0">
+    <div className="min-h-screen bg-stone-100 pb-[calc(76px+env(safe-area-inset-bottom,0px))] lg:pb-0">
       {/* ---------- Gornja traka ---------- */}
       <header className="sticky top-0 z-30 border-b border-ink-800 bg-ink text-white safe-top">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
@@ -79,7 +109,7 @@ export default function Layout() {
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-bold leading-tight">{APP_NAME}</p>
             <p className="truncate text-xs text-stone-400">
-              {isAdmin ? 'Vlasnik' : 'Radnik'} · {profile?.full_name}
+              {isAdmin ? 'Admin' : 'Radnik'} · {profile?.full_name}
             </p>
           </div>
 
@@ -120,10 +150,10 @@ export default function Layout() {
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xl">
-                  <div className="border-b border-slate-100 px-4 py-3">
+                <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-stone-200 bg-white text-stone-900 shadow-xl">
+                  <div className="border-b border-stone-100 px-4 py-3">
                     <p className="truncate text-sm font-bold">{profile?.full_name}</p>
-                    <p className="truncate text-xs text-slate-500">{profile?.email}</p>
+                    <p className="truncate text-xs text-stone-500">{profile?.email}</p>
                   </div>
                   <div className="p-2">
                     <Button
@@ -152,7 +182,7 @@ export default function Layout() {
       {/* ---------- Donja navigacija (mobilni) ---------- */}
       {/* Fiksna visina i zabranjen prelom teksta — dugmad stoje na istom
           mestu bez obzira na to koja je sekcija otvorena. */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur safe-bottom lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-stone-200 bg-white/95 backdrop-blur safe-bottom lg:hidden">
         <div className="mx-auto flex max-w-lg">
           {navItems.map((item) => (
             <NavLink
@@ -163,7 +193,7 @@ export default function Layout() {
                 cx(
                   'flex h-[56px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5',
                   'text-[11px] font-semibold transition-colors',
-                  isActive ? 'text-brand-600' : 'text-slate-500',
+                  isActive ? 'text-brand-600' : 'text-stone-500',
                 )
               }
             >

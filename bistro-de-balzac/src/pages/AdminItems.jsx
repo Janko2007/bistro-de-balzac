@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabaseClient'
 import { categoryComparator, loadCategories } from '../lib/categories'
 import CategoryManager from '../components/CategoryManager'
 import ItemSalesReport from '../components/ItemSalesReport'
+import { blankFields, heading, printDocument, table } from '../lib/print'
+import ReportPicker from '../components/ReportPicker'
 import {
   Badge,
   Button,
@@ -44,6 +46,7 @@ export default function AdminItems() {
   const [listOpen, setListOpen] = useState(false)
   const [openCats, setOpenCats] = useState(() => new Set())
 
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -95,9 +98,70 @@ export default function AdminItems() {
       if (!map.has(item.category)) map.set(item.category, [])
       map.get(item.category).push(item)
     }
-    // Redosled kategorija je onaj koji je vlasnik podesio.
+    // Redosled kategorija je onaj koji je admin podesio.
     return Array.from(map.entries()).sort((a, b) => compareCats(a[0], b[0]))
   }, [items, search, showInactive, compareCats])
+
+  /** Aktivni artikli po kategorijama — osnova za obrazac koji se štampa. */
+  const printableGroups = useMemo(() => {
+    const map = new Map()
+    for (const item of items.filter((i) => i.is_active)) {
+      if (!map.has(item.category)) map.set(item.category, [])
+      map.get(item.category).push(item)
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'sr'))
+    }
+    return Array.from(map.entries()).sort((a, b) => compareCats(a[0], b[0]))
+  }, [items, compareCats])
+
+  /**
+   * Popis za štampu — prazan obrazac za ručno popunjavanje (rezerva kad
+   * telefon ostane bez baterije ili neta). `chosenCats` bira kategorije.
+   */
+  function printPopis(chosenCats) {
+    const columns = [
+      { label: 'Artikal' },
+      { label: 'Jed.', width: '9%' },
+      { label: 'Početno', align: 'right', width: '13%' },
+      { label: 'Dodato', align: 'right', width: '13%' },
+      { label: 'Prodato', align: 'right', width: '13%' },
+      { label: 'Krajnje', align: 'right', width: '13%' },
+    ]
+
+    // Pretraga na ekranu ne skraćuje popis — štampa se ono što je označeno.
+    const groups = printableGroups.filter(([category]) => chosenCats.includes(category))
+
+    const rows = []
+    let count = 0
+    for (const [category, catItems] of groups) {
+      rows.push({ kind: 'group', label: category, right: String(catItems.length) })
+      for (const item of catItems) {
+        count += 1
+        rows.push({ cells: [item.name, item.unit, '', '', '', ''] })
+      }
+    }
+
+    printDocument({
+      title: 'Popis artikala',
+      subtitle: 'Obrazac za ručni popis — upisuje se početno stanje, dodato i prodato',
+      meta: [{ label: 'Artikala', value: String(count) }],
+      // Viši redovi i tanka linija u praznim poljima — da ima gde da se piše.
+      // Viši redovi, linija za pisanje i uspravne crte — da se vidi gde ide
+      // koji broj kad se popis popunjava rukom.
+      extraCss: `
+        table.t td { height: 26px; }
+        table.t tr:not(.g) td:empty { border-bottom: 1px solid #b9b3ad; }
+        table.t th + th, table.t tr:not(.g) td + td { border-left: 1px solid #e7e5e4; }
+        table.t tr.g td { height: auto; }
+      `,
+      content: [
+        blankFields(['Datum', 'Smena', 'Radnik', 'Potpis']),
+        heading('Artikli po kategorijama'),
+        table({ columns, rows, empty: 'Nema aktivnih artikala.' }),
+      ].join(''),
+    })
+  }
 
   function openNew() {
     const maxSort = items.reduce((m, i) => Math.max(m, i.sort_order), 0)
@@ -242,7 +306,7 @@ export default function AdminItems() {
 
         {listOpen && (
         <>
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-stone-100 px-4 py-2.5">
           <Button
             variant="ghost"
             size="sm"
@@ -255,12 +319,15 @@ export default function AdminItems() {
           <Button variant="secondary" size="sm" onClick={() => setCatManagerOpen(true)}>
             Kategorije
           </Button>
+          <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
+            Preuzmi popis
+          </Button>
           <Button size="sm" className="ml-auto" onClick={openNew}>
             + Novi
           </Button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 border-y border-slate-200 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 border-y border-stone-200 px-4 py-3">
           <Input
             type="search"
             placeholder="Pretraži…"
@@ -268,12 +335,12 @@ export default function AdminItems() {
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 min-w-[180px]"
           />
-          <label className="flex shrink-0 items-center gap-2 text-sm font-medium text-slate-600">
+          <label className="flex shrink-0 items-center gap-2 text-sm font-medium text-stone-600">
             <input
               type="checkbox"
               checked={showInactive}
               onChange={(e) => setShowInactive(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              className="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500"
             />
             Prikaži isključene
           </label>
@@ -287,7 +354,7 @@ export default function AdminItems() {
             action={<Button onClick={openNew}>Dodaj prvi artikal</Button>}
           />
         ) : (
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-stone-100">
             {grouped.map(([category, catItems]) => (
               <div key={category}>
                 <CategoryToggle
@@ -295,12 +362,12 @@ export default function AdminItems() {
                   open={isCatOpen(category)}
                   onToggle={() => toggleCat(category)}
                   right={
-                    <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-bold tabular-nums text-slate-500 ring-1 ring-inset ring-slate-300">
+                    <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-bold tabular-nums text-stone-500 ring-1 ring-inset ring-stone-300">
                       {catItems.length}
                     </span>
                   }
                 />
-                <div className={cx('divide-y divide-slate-100', !isCatOpen(category) && 'hidden')}>
+                <div className={cx('divide-y divide-stone-100', !isCatOpen(category) && 'hidden')}>
                   {catItems.map((item) => (
                     <div
                       key={item.id}
@@ -311,16 +378,16 @@ export default function AdminItems() {
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="truncate text-sm font-semibold text-slate-800">
+                          <p className="truncate text-sm font-semibold text-stone-800">
                             {item.name}
                           </p>
                           {!item.is_active && (
-                            <Badge className="bg-slate-200 text-slate-600 ring-slate-300">
+                            <Badge className="bg-stone-200 text-stone-600 ring-stone-300">
                               isključen
                             </Badge>
                           )}
                         </div>
-                        <p className="text-xs text-slate-400">
+                        <p className="text-xs text-stone-400">
                           {item.unit} · redosled {item.sort_order}
                         </p>
                       </div>
@@ -349,6 +416,20 @@ export default function AdminItems() {
         </>
         )}
       </Card>
+
+      {/* Koje kategorije ulaze u odštampan popis */}
+      <ReportPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Preuzmi popis za štampu"
+        description="Prazan obrazac za ručni popis. Označi kategorije koje ti trebaju."
+        options={printableGroups.map(([category, catItems]) => ({
+          key: category,
+          label: category,
+          hint: countLabel(catItems.length, 'artikal'),
+        }))}
+        onConfirm={printPopis}
+      />
 
       {/* ---------- Modal: dodavanje / izmena ---------- */}
       <Modal
@@ -407,12 +488,12 @@ export default function AdminItems() {
             </Field>
           </div>
 
-          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+          <label className="flex items-center gap-2 text-sm font-medium text-stone-700">
             <input
               type="checkbox"
               checked={form.is_active}
               onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
-              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              className="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500"
             />
             Aktivan (prikazuje se radnicima u popisu)
           </label>
@@ -450,7 +531,7 @@ export default function AdminItems() {
           </div>
         }
       >
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-stone-600">
           Da li sigurno želiš da obrišeš <strong>{confirmDelete?.name}</strong>? Ako je artikal već
           korišćen u nekom popisu, bolje je da ga samo isključiš.
         </p>

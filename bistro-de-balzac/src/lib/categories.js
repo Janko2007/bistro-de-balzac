@@ -2,7 +2,7 @@ import { supabase } from './supabaseClient'
 
 /**
  * Kategorije određuju redosled kojim se artikli prikazuju u popisu.
- * Vlasnik ih menja kroz Artikli -> Kategorije.
+ * Admin ih menja kroz Artikli -> Kategorije.
  */
 export async function loadCategories() {
   const { data, error } = await supabase
