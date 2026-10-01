@@ -633,8 +633,8 @@ export default function AdminDeposits() {
       </Card>
 
       {/* ---------- Traka sa označenim danima ---------- */}
+      {/* Iznad donje navigacije, uz prostor za crtu za gašenje na iPhone-u. */}
       {selected.size > 0 && (
-        {/* Iznad donje navigacije, uz prostor za crtu za gašenje na iPhone-u. */}
         <div className="sticky bottom-[calc(68px+env(safe-area-inset-bottom,0px))] z-20 lg:bottom-4">
           <div className="flex items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-white">
             <div className="min-w-0 flex-1">
