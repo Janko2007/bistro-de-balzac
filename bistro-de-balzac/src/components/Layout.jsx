@@ -7,6 +7,10 @@ import Avatar from './Avatar'
 import { Button } from './ui'
 import InstallPrompt from './InstallPrompt'
 
+/* Vreme pravljenja verzije — upisuje ga Vite pri objavi (vidi vite.config.js).
+   U razvoju te promenljive nema, pa stoji rezerva. */
+const BUILD_TIME = typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : 'razvojna'
+
 /* Ikone (inline SVG — bez dodatnih biblioteka) */
 const icons = {
   plus: 'M12 5v14M5 12h14',
@@ -154,6 +158,11 @@ export default function Layout() {
                   <div className="border-b border-stone-100 px-4 py-3">
                     <p className="truncate text-sm font-bold">{profile?.full_name}</p>
                     <p className="truncate text-xs text-stone-500">{profile?.email}</p>
+                    {/* Kad je verzija napravljena — da se vidi da li je stigla
+                        nova, ili pregledač još drži staru kopiju. */}
+                    <p className="mt-1 truncate text-[11px] text-stone-400">
+                      verzija {BUILD_TIME}
+                    </p>
                   </div>
                   <div className="p-2">
                     <Button
