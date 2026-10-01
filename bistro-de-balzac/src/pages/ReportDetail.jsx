@@ -785,12 +785,13 @@ export default function ReportDetail() {
           }
         />
 
-        {/* Filter: svi artikli / nije popisano / popisano, a nije prodato */}
+        {/* Filter: svi artikli / popisano, a nije prodato.
+            „Nije popisano“ se ne nabraja — prodato se upisuje samo za ono što
+            je prodavano, pa prazno polje nije greška. */}
         {groupedItems.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-b border-stone-100 px-4 py-2.5">
             {[
               ['sve', 'Svi artikli'],
-              ['nepopisano', 'Nije popisano'],
               ['nije', 'Nije prodato'],
             ].map(([key, label]) => (
               <button
@@ -815,9 +816,7 @@ export default function ReportDetail() {
           <p className="px-4 py-8 text-center text-sm text-stone-500">Popis je prazan.</p>
         ) : visibleGroups.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-stone-500">
-            {itemFilter === 'nepopisano'
-              ? 'Popisani su svi artikli.'
-              : 'Svaki popisan artikal je prodat bar jednom.'}
+            Svaki popisan artikal je prodat bar jednom.
           </p>
         ) : (
           <div className="divide-y divide-stone-100">
@@ -825,7 +824,6 @@ export default function ReportDetail() {
               // U filtriranom prikazu kategorije su odmah otvorene — da se vidi šta je izdvojeno.
               const open = itemFilter !== 'sve' || openCats.has(category)
               const catSold = catItems.reduce((s, i) => s + Number(i.qty_sold ?? 0), 0)
-              const catMissing = catItems.filter((i) => i.missing).length
 
               return (
                 <div key={category}>
@@ -836,11 +834,6 @@ export default function ReportDetail() {
                     right={
                       itemFilter === 'sve' ? (
                         <span className="flex shrink-0 items-center gap-2">
-                          {catMissing > 0 && (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-                              {catMissing} nepopisano
-                            </span>
-                          )}
                           <span className="text-xs font-semibold tabular-nums text-stone-500">
                             prodato {formatQty(catSold)}
                           </span>

@@ -126,11 +126,15 @@ function terminalReportOf(shift) {
     : 'ukupan izveštaj sa aparata za kartice'
 }
 
-/** Popisan artikal = upisano mu je prodato (i 0 se računa). */
-const isDone = (row) => (row?.p ?? '') !== ''
-
-/** Započet artikal = uneto mu je početno stanje ili dodato. */
-const isStarted = (row) => (row?.s ?? '') !== '' || (row?.d ?? '') !== ''
+/**
+ * Popisan artikal = upisano mu je BILO ŠTA.
+ *
+ * Početno stanje se upisuje na početku smene, a prodato tek na kraju i samo
+ * ako je artikal uopšte prodavan. Zato prazno „prodato“ znači NULA prodatih,
+ * a ne „nije popisano“ — artikal kome je upisano početno je popisan.
+ */
+const isDone = (row) =>
+  (row?.s ?? '') !== '' || (row?.d ?? '') !== '' || (row?.p ?? '') !== ''
 
 export default function NewReport() {
   const { profile } = useAuth()
@@ -478,7 +482,7 @@ export default function NewReport() {
 
       const item = itemsRef.current.find((i) => i.id === itemId)
       const row = rowsRef.current[itemId] ?? EMPTY_ROW
-      const blank = !isStarted(row) && !isDone(row)
+      const blank = !isDone(row)
 
       // Prodato veće od novog stanja → krajnje bi bilo negativno. Takav red se
       // ne upisuje dok se ne ispravi (ostaje „neupisan“, pa ga kolega ne pregazi).
@@ -503,10 +507,11 @@ export default function NewReport() {
             category: item.category,
             qty_start: toDb(row.s),
             qty_added: toDb(row.d),
-            // Radnik upisuje prodato; krajnje stanje se iz njega računa —
+            // Prazno „prodato“ je nula prodatih — artikal koji nije prodavan
+            // radnik ostavlja prazan. Krajnje stanje se računa iz prodatog,
             // kod brojača po svojoj formuli (početno + prodato).
-            qty_sold: isDone(row) ? toDb(row.p) : null,
-            qty_end: isDone(row) ? endOf(row, item.is_counter) : null,
+            qty_sold: parseNumber(row.p),
+            qty_end: endOf(row, item.is_counter),
             is_counter: !!item.is_counter,
           },
           { onConflict: 'report_id,item_id' },
@@ -734,12 +739,6 @@ export default function NewReport() {
 
   const doneCount = useMemo(() => items.filter((i) => isDone(rows[i.id])).length, [items, rows])
 
-  /** Započeti, a nedovršeni — smena se sa njima ne može zatvoriti. */
-  const missingSold = useMemo(
-    () => items.filter((i) => isStarted(rows[i.id]) && !isDone(rows[i.id])),
-    [items, rows],
-  )
-
   /** Artikli kod kojih je prodato veće od novog stanja — greška u unosu. */
   const errorCount = useMemo(
     () => items.filter((i) => isDone(rows[i.id]) && endOf(rows[i.id], i.is_counter) < 0).length,
@@ -826,10 +825,7 @@ export default function NewReport() {
   /* ------------------------------------------------------------ */
   function validate() {
     if (!reportId) return 'Prvo uđi u smenu.'
-    if (doneCount === 0) return 'Unesi prodato bar za jedan artikal.'
-    if (missingSold.length > 0) {
-      return `Kod ${countLabel(missingSold.length, 'artikla')} je uneto početno stanje, a nije prodato. Popuni ih pa zatvori smenu.`
-    }
+    if (doneCount === 0) return 'Popiši bar jedan artikal.'
     if (errorCount > 0) {
       return `Kod ${countLabel(errorCount, 'artikla')} je prodato veće od novog stanja. Ispravi pa zatvori smenu.`
     }
@@ -848,9 +844,6 @@ export default function NewReport() {
     if (problem) {
       toast.error(problem)
       // Ono što fali se odmah otvori, da radnik vidi gde da upiše.
-      if (missingSold.length > 0) {
-        setOpenCats(new Set(missingSold.map((i) => i.category)))
-      }
       if (pazar === '' || cardTooBig) setPazarOpen(true)
       return
     }
@@ -1167,8 +1160,8 @@ export default function NewReport() {
         <CardHeader
           title="Popis artikala"
           subtitle={`${doneCount}/${items.length}${
-            missingSold.length > 0 ? ` · ${missingSold.length} bez prodatog` : ''
-          }${errorCount > 0 ? ` · ${errorCount} sa greškom` : ''}`}
+            errorCount > 0 ? ` · ${errorCount} sa greškom` : ''
+          }`}
           action={
             <div className="flex shrink-0 items-center gap-1">
               <Button
@@ -1203,8 +1196,6 @@ export default function NewReport() {
           {grouped.map(([category, categoryItems]) => {
             const open = isCatOpen(category)
             const done = categoryItems.filter((i) => isDone(rows[i.id])).length
-            const half = categoryItems.filter((i) => isStarted(rows[i.id]) && !isDone(rows[i.id]))
-              .length
 
             return (
               <div key={category}>
@@ -1216,13 +1207,9 @@ export default function NewReport() {
                     <span
                       className={cx(
                         'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums ring-1 ring-inset',
-                        half > 0
-                          ? 'bg-amber-100 text-amber-800 ring-amber-600/20'
-                          : done === categoryItems.length
-                            ? 'bg-emerald-100 text-emerald-800 ring-emerald-600/20'
-                            : done > 0
-                              ? 'bg-amber-100 text-amber-800 ring-amber-600/20'
-                              : 'bg-white text-stone-500 ring-stone-300',
+                        done === categoryItems.length
+                          ? 'bg-emerald-100 text-emerald-800 ring-emerald-600/20'
+                          : 'bg-white text-stone-500 ring-stone-300',
                       )}
                     >
                       {done}/{categoryItems.length}
@@ -1247,7 +1234,6 @@ export default function NewReport() {
                   categoryItems.map((item) => {
                     const row = rows[item.id] ?? EMPTY_ROW
                     const done = isDone(row)
-                    const half = isStarted(row) && !done
                     // Brojač (espresso): krajnje = početno + prodato, i nema
                     // „dodato“ — kasa broji unapred, ne popisuju se zalihe.
                     const counter = !!item.is_counter
@@ -1259,11 +1245,7 @@ export default function NewReport() {
                         key={item.id}
                         className={cx(
                           'flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 transition',
-                          bad
-                            ? 'bg-rose-50'
-                            : half
-                              ? 'bg-amber-50'
-                              : done && 'bg-emerald-50/50',
+                          bad ? 'bg-rose-50' : done && 'bg-emerald-50/50',
                         )}
                       >
                         <div className="min-w-[130px] flex-1">
@@ -1301,13 +1283,11 @@ export default function NewReport() {
                                 onChange={(e) => setCell(item.id, c.key, e.target.value)}
                                 className={cx(
                                   'w-[78px] rounded-lg border px-1.5 py-2.5 text-center text-base font-bold tabular-nums outline-none transition',
-                                  c.key === 'p' && half
-                                    ? 'border-amber-400 bg-white focus:ring-2 focus:ring-amber-500/30'
-                                    : c.key === 'p' && done && !bad
+                                  c.key === 'p' && bad
+                                    ? 'border-rose-400 bg-white text-rose-700 focus:ring-2 focus:ring-rose-500/30'
+                                    : c.key === 'p' && row.p !== ''
                                       ? 'border-emerald-400 bg-white text-emerald-800 focus:ring-2 focus:ring-emerald-500/30'
-                                      : bad && c.key === 'p'
-                                        ? 'border-rose-400 bg-white text-rose-700 focus:ring-2 focus:ring-rose-500/30'
-                                        : 'border-stone-300 bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30',
+                                      : 'border-stone-300 bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30',
                                 )}
                               />
                             ),
@@ -1327,13 +1307,6 @@ export default function NewReport() {
                             {done ? formatQty(end) : '—'}
                           </span>
                         </div>
-
-                        {half && (
-                          <p className="w-full text-xs font-medium text-amber-700">
-                            Fali prodato (ako ništa nije prodato, upiši 0). Dok ga ne upišeš, smena
-                            ne može da se zatvori.
-                          </p>
-                        )}
 
                         {bad && (
                           <p className="w-full text-xs font-medium text-rose-600">
