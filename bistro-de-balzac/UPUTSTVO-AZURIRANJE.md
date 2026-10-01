@@ -26,6 +26,11 @@ Levo klikni **SQL Editor** → **New query**. Onda, jedan po jedan:
 | 2. | `AZURIRANJE-BAZE-3.sql` | izbor *dnevnica / plata* i procenat |
 | 3. | `AZURIRANJE-BAZE-4.sql` | umanjena dnevnica za dan + brisanje uplate |
 | 4. | `AZURIRANJE-BAZE-5.sql` | artikal sa brojačem (espresso) |
+| 5. | `AZURIRANJE-BAZE-6.sql` | redosled radnika + **popis uživo** |
+
+> U paketu je i **`POCETAK-ISPOCETKA.sql`** — on **briše sve popise, isplate i
+> uplate**, da kreneš od nule posle probe. Nije deo ažuriranja; pokreni ga
+> samo ako to zaista hoćeš, jer se ne može poništiti.
 
 Za svaki: otvori fajl iz ovog foldera, označi sve (**Ctrl + A**), kopiraj
 (**Ctrl + C**), nalepi u Supabase (**Ctrl + V**), klikni **Run**. Dole treba da
@@ -141,6 +146,30 @@ Zato:
 ---
 
 ## Šta je novo u ovoj verziji
+
+### Popis uživo
+
+Kad dvoje rade istu smenu, ono što jedan upiše drugom se pojavi **za sekundu,
+bez osvežavanja** — i brojevi u popisu, i pazar, i ko je ušao u smenu, i slike.
+Polje koje baš kucaš se ne dira, da ti se unos ne vrati unazad.
+
+Aplikacija je to radila od početka, ali Supabase to nije propuštao — nijedna
+ranija skripta nije uključila slanje izmena. Uključuje ga `AZURIRANJE-BAZE-6.sql`.
+
+> Provera: otvori isti popis na telefonu i na računaru, upiši broj na jednom —
+> na drugom se pojavi sam.
+
+### Redosled radnika
+
+Na ekranu **Radnici** svaki aktivan radnik ima **▲▼** levo od slike — njima ga
+podižeš ili spuštaš. Redosled se odmah pamti i važi za sve. Nov nalog ide na
+kraj spiska, pa ga odatle podigneš gde treba.
+
+### Nema više minusa u obračunu
+
+Kad je nekome isplaćeno više nego što je zaradio, umesto *„za isplatu −2.000"*
+piše **„pretplaćeno 2.000"**. Radniku na njegovom ekranu piše *„Primio si
+više"*. Ako je isplata greška, brišeš je u **Radnici → Isplati → ×**.
 
 ### Artikal sa brojačem (espresso)
 

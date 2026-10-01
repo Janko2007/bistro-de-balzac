@@ -87,8 +87,9 @@ export default function AdminDashboard() {
     return () => clearTimeout(timer)
   }, [search])
 
+  /* Vrti se samo prvi put. Kad se menja filter ili period, stari spisak
+     ostaje na ekranu dok novi ne stigne — bez praznog ekrana i poskakivanja. */
   const load = useCallback(async () => {
-    setLoading(true)
 
     let query = supabase
       .from('report_summary')
@@ -126,6 +127,22 @@ export default function AdminDashboard() {
       { cash: 0, card: 0, total: 0, pending: 0 },
     )
   }, [reports])
+
+  /**
+   * Ko je radio smenu — svi iz nje, a ne samo onaj ko ju je otvorio.
+   * Imena se uzimaju iz već učitanog spiska radnika (za filter), bez
+   * dodatnog upita.
+   */
+  const nameById = useMemo(() => new Map(workers.map((w) => [w.id, w.full_name])), [workers])
+
+  const namesOf = useCallback(
+    (report) =>
+      (report.staff_ids ?? [])
+        .map((wid) => nameById.get(wid))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b)),
+    [nameById],
+  )
 
   /**
    * Grupisanje po datumu za pregledniju listu.
@@ -180,7 +197,7 @@ export default function AdminDashboard() {
     const rows = reports.map((r) => [
       r.report_date,
       SHIFT_LABELS[r.shift] ?? r.shift,
-      r.created_by_name ?? '',
+      namesOf(r).join(', ') || (r.created_by_name ?? ''),
       r.total_amount,
       r.card_amount,
       r.cash_amount,
@@ -232,7 +249,7 @@ export default function AdminDashboard() {
         rows.push([
           formatDate(r.report_date),
           SHIFT_LABELS[r.shift] ?? r.shift,
-          r.created_by_name ?? '—',
+          namesOf(r).join(', ') || r.created_by_name || '—',
           STATUS_LABELS[r.status] ?? r.status,
           formatMoney(r.total_amount, false),
           formatMoney(r.card_amount, false),
@@ -558,7 +575,12 @@ export default function AdminDashboard() {
                   </div>
                   <div className="divide-y divide-stone-100">
                     {dayReports.map((report) => (
-                      <ReportListItem key={report.id} report={report} showAuthor />
+                      <ReportListItem
+                        key={report.id}
+                        report={report}
+                        showAuthor
+                        staffNames={namesOf(report)}
+                      />
                     ))}
                   </div>
                 </div>

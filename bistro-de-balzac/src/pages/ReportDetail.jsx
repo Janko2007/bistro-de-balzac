@@ -512,7 +512,7 @@ export default function ReportDetail() {
   const staffNames = staffList.map((s) => s.profile.full_name)
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4 pb-28">
       {/* ---------- Zaglavlje ---------- */}
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3 p-4">
@@ -934,7 +934,11 @@ export default function ReportDetail() {
 
       {/* ---------- Radnje admina ---------- */}
       {isAdmin && (
-        <div className="fixed inset-x-0 bottom-[60px] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:safe-bottom">
+        {/* Traka stoji tačno iznad donje navigacije. Na iPhone-u je navigacija
+            viša za prostor iznad crte za gašenje aplikacije — bez
+            `safe-area-inset-bottom` traka bi upala pod nju. Na računaru nema
+            navigacije, pa ide na dno, sa malo vazduha ispod dugmadi. */}
+        <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
             {report.status !== 'potvrdjen' ? (
               <Button
@@ -1191,8 +1195,10 @@ export default function ReportDetail() {
         }
       >
         <p className="text-sm text-stone-600">
-          Popis odmah nestaje sa spiskova i iz obračuna, ali se čuva još{' '}
-          <strong>12 sati</strong> — do tada možeš da ga vratiš u{' '}
+          Sa njim nestaje i njegov <strong>pazar</strong> — iz Pregleda, iz Uplata i iz dnevnica.
+        </p>
+        <p className="mt-2 text-[13px] text-stone-400">
+          Čuva se još <strong>12 sati</strong> — do tada ga vraćaš u{' '}
           <strong>Pregled → Obrisani popisi</strong>. Posle toga se briše trajno, zajedno sa
           slikama.
         </p>

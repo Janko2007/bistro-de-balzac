@@ -1509,7 +1509,7 @@ export default function NewReport() {
           navigacija viša za prostor iznad crte za gašenje aplikacije — zato
           se dodaje i `safe-area-inset-bottom`, inače bi traka upala pod nju.
           Na računaru nema donje navigacije, pa je traka na samom dnu. */}
-      <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
+      <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="eyebrow">Predato</p>

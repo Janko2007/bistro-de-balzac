@@ -154,11 +154,12 @@ export default function AdminWorkers() {
   )
 
   const load = useCallback(async () => {
+    // Redosled zadaje admin strelicama; ime je samo rezerva kad su isti.
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('is_deleted', false)
-      .order('role')
+      .order('sort_order')
       .order('full_name')
 
     if (error) {
@@ -192,6 +193,34 @@ export default function AdminWorkers() {
   /* Neaktivni ne stoje među aktivnima — sklonjeni su na dno, iza dugmeta. */
   const activeRows = useMemo(() => rows.filter((r) => r.person.is_active), [rows])
   const inactiveRows = useMemo(() => rows.filter((r) => !r.person.is_active), [rows])
+
+  /**
+   * Zamena mesta sa susedom iznad (-1) ili ispod (+1).
+   * Menja se samo redosled aktivnih — neaktivni stoje na dnu, iza dugmeta.
+   */
+  async function moveWorker(index, dir) {
+    const a = activeRows[index]?.person
+    const b = activeRows[index + dir]?.person
+    if (!a || !b) return
+
+    // Odmah na ekranu, pa u bazu — da spisak ne „poskoči“ posle odgovora.
+    setPeople((prev) =>
+      prev.map((p) => {
+        if (p.id === a.id) return { ...p, sort_order: b.sort_order }
+        if (p.id === b.id) return { ...p, sort_order: a.sort_order }
+        return p
+      }),
+    )
+
+    const [r1, r2] = await Promise.all([
+      supabase.from('profiles').update({ sort_order: b.sort_order }).eq('id', a.id),
+      supabase.from('profiles').update({ sort_order: a.sort_order }).eq('id', b.id),
+    ])
+    if (r1.error || r2.error) {
+      toast.error(errorMessage(r1.error || r2.error, 'Redosled nije sačuvan.'))
+      load()
+    }
+  }
 
   /** Koliko radnik još ima da primi u izabranom periodu. */
   function owedOf(person) {
@@ -625,16 +654,46 @@ export default function AdminWorkers() {
 
   if (loading) return <FullPageLoader />
 
-  /** Jedan radnik na spisku — isti red i za aktivne i za neaktivne. */
-  const workerRow = ({ person, calc }) => (
-    <div key={person.id} className={cx('p-4', !person.is_active && 'opacity-60')}>
+  /**
+   * Jedan radnik na spisku — isti red i za aktivne i za neaktivne.
+   * `index` dolazi iz `map` i služi strelicama za redosled (samo kod aktivnih).
+   */
+  const workerRow = ({ person, calc }, index = 0) => (
+    <div
+      key={person.id}
+      className={cx('px-4 py-3 lg:py-2.5', !person.is_active && 'opacity-60')}
+    >
       <div className="flex items-start gap-3">
+        {/* Redosled zadaje admin — najvažniji radnici na vrh. */}
+        {person.is_active && activeRows.length > 1 && (
+          <div className="flex shrink-0 flex-col gap-0.5 pt-0.5">
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => moveWorker(index, -1)}
+              aria-label={`Pomeri ${person.full_name} gore`}
+              className="rounded-md px-1.5 text-[11px] leading-5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700 disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              ▲
+            </button>
+            <button
+              type="button"
+              disabled={index === activeRows.length - 1}
+              onClick={() => moveWorker(index, 1)}
+              aria-label={`Pomeri ${person.full_name} dole`}
+              className="rounded-md px-1.5 text-[11px] leading-5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700 disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              ▼
+            </button>
+          </div>
+        )}
+
         <Avatar
           name={person.full_name}
           path={person.avatar_path}
           zoomable
           className={cx(
-            'h-11 w-11 text-sm',
+            'h-10 w-10 text-sm',
             person.role === 'admin' ? 'bg-ink text-white' : 'bg-stone-200 text-stone-700',
           )}
         />
@@ -668,9 +727,11 @@ export default function AdminWorkers() {
         </div>
       </div>
 
-      {/* Obračun — sitan naslov iznad broja, pa se čita bez traženja. */}
-      <div className="mt-3 rounded-2xl border border-stone-200/70 bg-white p-3">
-        <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+      {/* Obračun i dugmad. Na telefonu jedno ispod drugog, a na širem ekranu
+          u istom redu — tako spisak od 13 radnika stane bez skrolovanja. */}
+      <div className="mt-2 flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
+      <div className="rounded-2xl border border-stone-200/70 bg-white px-3 py-2.5 lg:flex-1">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           {[
             // Dana, a ne smena — ko radi međusmenu ima dve smene, a jednu dnevnicu.
             [plural(calc.days, 'dan'), String(calc.days), ''],
@@ -693,6 +754,7 @@ export default function AdminWorkers() {
               </span>
             ))}
 
+          {/* Minus se ne piše — pretplata se kaže rečju, da se ne čita kao greška. */}
           <span
             className={cx(
               'ml-auto rounded-full px-3 py-1.5 text-sm font-bold tabular-nums',
@@ -703,21 +765,15 @@ export default function AdminWorkers() {
                   : 'bg-stone-100 text-stone-500',
             )}
           >
-            {formatMoney(calc.balance, false)}
-            <span className="ml-1 text-[11px] font-semibold opacity-80">za isplatu</span>
+            {formatMoney(Math.abs(calc.balance), false)}
+            <span className="ml-1 text-[11px] font-semibold opacity-80">
+              {calc.balance < 0 ? 'pretplaćeno' : 'za isplatu'}
+            </span>
           </span>
         </div>
       </div>
 
-      {calc.returned > 0 && (
-        <p className="mt-1.5 text-xs text-amber-700">
-          {calc.returned}{' '}
-          {plural(calc.returned, ['smena je vraćena', 'smene su vraćene', 'smena je vraćeno'])} na
-          ispravku i ne ulazi u obračun.
-        </p>
-      )}
-
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 lg:shrink-0">
         <Button
           variant="secondary"
           size="sm"
@@ -772,6 +828,15 @@ export default function AdminWorkers() {
           </Button>
         )}
       </div>
+      </div>
+
+      {calc.returned > 0 && (
+        <p className="mt-1.5 text-xs text-amber-700">
+          {calc.returned}{' '}
+          {plural(calc.returned, ['smena je vraćena', 'smene su vraćene', 'smena je vraćeno'])} na
+          ispravku i ne ulazi u obračun.
+        </p>
+      )}
     </div>
   )
 
@@ -797,7 +862,13 @@ export default function AdminWorkers() {
           <Stat label="Zarađeno" value={formatMoney(totals.earned, false)} />
           <Stat label="Bonusi" value={formatMoney(totals.bonus, false)} />
           <Stat label="Isplaćeno" value={formatMoney(totals.paid, false)} />
-          <Stat label="Za isplatu" value={formatMoney(totals.balance, false)} tone="total" />
+          {/* Ako je isplaćeno više nego što je zarađeno, ne piše se minus nego
+              „Pretplaćeno“ — minus ispod naslova „za isplatu“ se čita kao greška. */}
+          <Stat
+            label={totals.balance < 0 ? 'Pretplaćeno' : 'Za isplatu'}
+            value={formatMoney(Math.abs(totals.balance), false)}
+            tone={totals.balance < 0 ? 'expense' : 'total'}
+          />
         </div>
       </Card>
 
@@ -1360,9 +1431,16 @@ export default function AdminWorkers() {
                 </span>
               </div>
               <div className="mt-1 flex justify-between border-t border-stone-200 pt-1.5">
-                <span className="font-semibold text-stone-700">Za isplatu</span>
-                <span className="font-extrabold tabular-nums text-brand-700">
-                  {formatMoney(modal.calc.balance)}
+                <span className="font-semibold text-stone-700">
+                  {modal.calc.balance < 0 ? 'Pretplaćeno' : 'Za isplatu'}
+                </span>
+                <span
+                  className={cx(
+                    'font-extrabold tabular-nums',
+                    modal.calc.balance < 0 ? 'text-rose-600' : 'text-brand-700',
+                  )}
+                >
+                  {formatMoney(Math.abs(modal.calc.balance), false)}
                 </span>
               </div>
             </div>

@@ -63,8 +63,15 @@ create table if not exists public.profiles (
   is_active   boolean     not null default true,
   is_deleted  boolean     not null default false,    -- obrisan, ali ima istoriju
   avatar_path text,                                  -- slika profila u bucket-u 'avatari'
+  -- Redosled na ekranu Radnici. Podrazumevano je namerno veliko — nov nalog
+  -- ide na kraj spiska, pa ga admin odatle strelicama podiže gde treba.
+  sort_order  integer     not null default 1000,
   created_at  timestamptz not null default now()
 );
+
+alter table public.profiles add column if not exists sort_order integer not null default 1000;
+alter table public.profiles alter column sort_order set default 1000;
+create index if not exists profiles_sort_idx on public.profiles (sort_order, full_name);
 
 comment on table public.profiles is 'Radnici i vlasnici. Red se kreira automatski kad se napravi auth korisnik.';
 
@@ -528,6 +535,7 @@ begin
     new.pay_model      := old.pay_model;
     new.monthly_salary := old.monthly_salary;
     new.percent        := old.percent;
+    new.sort_order     := old.sort_order;      -- radnik se ne gura na vrh spiska
     new.full_name      := old.full_name;       -- po imenu se prijavljuje — menja ga samo vlasnik
     new.email          := old.email;
 
@@ -1425,6 +1433,12 @@ begin
   alter publication supabase_realtime add table public.report_images;
 exception when duplicate_object then null;
 end $$;
+
+-- Kad se red obriše, Supabase podrazumevano šalje samo njegov ključ — tada
+-- aplikacija ne zna KOJI je artikal obrisan. Ovim se šalje ceo obrisani red.
+alter table public.shift_report_items  replica identity full;
+alter table public.shift_report_staff  replica identity full;
+alter table public.report_images       replica identity full;
 
 
 -- ---------------------------------------------------------------------

@@ -58,6 +58,7 @@ export default function AdminDeposits() {
   const [depSearchOpen, setDepSearchOpen] = useState(false)
   const [depSearch, setDepSearch] = useState('')
   const [depMonth, setDepMonth] = useState('') // '' = svi meseci
+  const [dayToDelete, setDayToDelete] = useState(null) // dan čiji se popisi brišu
 
   /* ---------------------------------------------------------------- */
   /*  Učitavanje                                                       */
@@ -270,6 +271,41 @@ export default function AdminDeposits() {
     setWorking(false)
     setModal(null)
     toast.success(`Uplata ${formatMoney(amount)} je upisana za ${countLabel(chosen.length, 'dan')}.`)
+    load()
+  }
+
+  /**
+   * Brisanje svih popisa jednog dana — odatle i njegov pazar.
+   *
+   * Pazar se nigde ne čuva posebno; računa se iz popisa. Zato se „stanje“ za
+   * taj dan skida tako što se obrišu popisi koji su ga napravili. Idu u korpu,
+   * pa se 12 sati mogu vratiti.
+   */
+  async function deleteDay() {
+    const date = dayToDelete.date
+    setWorking(true)
+
+    const { data, error } = await supabase
+      .from('shift_reports')
+      .select('id')
+      .eq('report_date', date)
+
+    if (error) {
+      setWorking(false)
+      return toast.error(errorMessage(error))
+    }
+
+    for (const row of data ?? []) {
+      const res = await supabase.rpc('trash_report', { p_id: row.id })
+      if (res.error) {
+        setWorking(false)
+        return toast.error(errorMessage(res.error))
+      }
+    }
+
+    setWorking(false)
+    setDayToDelete(null)
+    toast.success(`Popisi za ${formatDate(date)} su obrisani.`)
     load()
   }
 
@@ -581,6 +617,7 @@ export default function AdminDeposits() {
                       day={day}
                       checked={selected.has(day.date)}
                       onToggle={() => toggleDay(day.date)}
+                      onDelete={() => setDayToDelete(day)}
                     />
                   ))}
                 </div>
@@ -597,7 +634,8 @@ export default function AdminDeposits() {
 
       {/* ---------- Traka sa označenim danima ---------- */}
       {selected.size > 0 && (
-        <div className="sticky bottom-[68px] z-20 lg:bottom-3">
+        {/* Iznad donje navigacije, uz prostor za crtu za gašenje na iPhone-u. */}
+        <div className="sticky bottom-[calc(68px+env(safe-area-inset-bottom,0px))] z-20 lg:bottom-4">
           <div className="flex items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-white">
             <div className="min-w-0 flex-1">
               <p className="text-[11px] uppercase tracking-wide text-stone-400">
@@ -879,6 +917,41 @@ export default function AdminDeposits() {
           uplatu“. Popisi se ne diraju.
         </p>
       </Modal>
+
+      {/* ================================================================ */}
+      {/*  Modal: brisanje popisa jednog dana                              */}
+      {/* ================================================================ */}
+      <Modal
+        open={!!dayToDelete}
+        onClose={() => !working && setDayToDelete(null)}
+        title="Da li si siguran?"
+        size="sm"
+        footer={
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              disabled={working}
+              onClick={() => setDayToDelete(null)}
+            >
+              Ne, vrati me
+            </Button>
+            <Button variant="danger" className="flex-1" loading={working} onClick={deleteDay}>
+              Da, obriši
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-stone-600">
+          Brišu se <strong>svi popisi</strong> za{' '}
+          <strong>{dayToDelete ? longDay(dayToDelete.date) : ''}</strong> — sa njima nestaje i
+          pazar od <strong>{formatMoney(dayToDelete?.cash ?? 0, false)}</strong>.
+        </p>
+        <p className="mt-2 text-[13px] text-stone-400">
+          Nestaju i dnevnice i prodaja po artiklima za taj dan. Popisi idu u korpu i mogu da se
+          vrate 12 sati (Pregled → Obrisani popisi).
+        </p>
+      </Modal>
     </div>
   )
 }
@@ -886,16 +959,14 @@ export default function AdminDeposits() {
 /* ------------------------------------------------------------------ */
 /*  Jedan dan sa pazarom                                               */
 /* ------------------------------------------------------------------ */
-function DayRow({ day, checked, onToggle }) {
+function DayRow({ day, checked, onToggle, onDelete }) {
   return (
+    <div className={cx('flex items-center', checked ? 'bg-brand-50' : 'hover:bg-stone-50')}>
     <button
       type="button"
       onClick={onToggle}
       aria-pressed={checked}
-      className={cx(
-        'flex w-full items-center gap-3 px-4 py-2.5 text-left transition',
-        checked ? 'bg-brand-50' : 'hover:bg-stone-50',
-      )}
+      className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-left transition"
     >
       <span
         className={cx(
@@ -924,5 +995,28 @@ function DayRow({ day, checked, onToggle }) {
         {formatMoney(day.cash, false)}
       </span>
     </button>
+
+    {/* Probni ili pogrešan dan se odavde briše — zajedno sa popisima koji
+        su ga napravili, jer se pazar iz njih i računa. */}
+    <button
+      type="button"
+      onClick={onDelete}
+      aria-label={`Obriši popise za ${longDay(day.date)}`}
+      title="Obriši popise tog dana"
+      className="shrink-0 rounded-lg p-2 pr-3 text-stone-300 transition hover:text-rose-600"
+    >
+      <svg
+        className="h-4 w-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        aria-hidden="true"
+      >
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    </button>
+    </div>
   )
 }
