@@ -49,8 +49,14 @@ export default function ReportListItem({
         <span className="whitespace-nowrap text-[13px] font-bold text-stone-900">
           {formatDate(report.report_date)}
         </span>
-        <span className="min-w-0">
+        <span className="flex min-w-0 items-center gap-1.5">
           <ShiftTag shift={report.shift} />
+          {/* Uz izveštaj stoji poruka od admina — da se vidi i bez otvaranja. */}
+          {report.has_admin_note && (
+            <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-800">
+              poruka
+            </span>
+          )}
         </span>
         {/* Manja oznaka nego inače, da i „Vraćen na ispravku“ stane u isti red. */}
         <Badge

@@ -26,7 +26,12 @@ Levo klikni **SQL Editor** → **New query**. Onda, jedan po jedan:
 | 2. | `AZURIRANJE-BAZE-3.sql` | izbor *dnevnica / plata* i procenat |
 | 3. | `AZURIRANJE-BAZE-4.sql` | umanjena dnevnica za dan + brisanje uplate |
 | 4. | `AZURIRANJE-BAZE-5.sql` | artikal sa brojačem (espresso) |
-| 5. | `AZURIRANJE-BAZE-6.sql` | redosled radnika + **popis uživo** |
+| 5. | **`AZURIRANJE-BAZE-9-SVE.sql`** | redosled radnika, popis uživo, skrivanje grupa, način popisa i ispravka starih popisa |
+
+> **`AZURIRANJE-BAZE-9-SVE.sql` je skripte -6, -7 i -8 spojene u jednu**, pa ih
+> ne moraš pokretati posebno. Ako si neku već pokretao, svejedno — sve može
+> više puta, ništa se ne duplira. Fajlovi `-6`, `-7` i `-8` ostaju u paketu
+> samo zbog istorije.
 
 > U paketu je i **`POCETAK-ISPOCETKA.sql`** — on **briše sve popise, isplate i
 > uplate**, da kreneš od nule posle probe. Nije deo ažuriranja; pokreni ga
@@ -146,6 +151,35 @@ Zato:
 ---
 
 ## Šta je novo u ovoj verziji
+
+### Tri načina popisa
+
+Svaki artikal ima svoj način — biraš ga u **Artikli → Izmeni → Način popisa**:
+
+| Način | Radnik upisuje | Aplikacija računa |
+| --- | --- | --- |
+| **Zalihe** (podrazumevano) | prodato | krajnje = (početno + dodato) − prodato |
+| **Brojač** (espresso) | prodato | krajnje = početno + prodato |
+| **Krajnje stanje** (voće) | krajnje | prodato = (početno + dodato) − krajnje |
+
+Kolone u popisu ostaju iste, menja se samo koja se kuca. Kod voća polje
+**Kraj** postaje polje za unos, a **Prod.** prikazuje izračunat broj.
+
+### Prodato je neobavezno
+
+Početno stanje se upisuje na početku smene, prodato tek na kraju i **samo za
+ono što je prodavano**. Prazno prodato znači **nula prodatih**, pa krajnje
+stanje ostaje ono što je i bilo — *novo* (početno + dodato).
+
+Pri predaji smene sve što radnik nije dirao dobija **nule**, pa u izveštaju
+nema više „nepopisano“. Nestale su i žute oznake po kategorijama i upozorenje
+u redu artikla.
+
+### Skrivanje grupe artikala
+
+Osim pojedinačnog artikla (**Artikli → Isključi**), možeš da sakriješ i celu
+grupu: **Artikli → Kategorije → Sakrij**. Sakrivena grupa nestaje iz popisa, a
+artikli i stari izveštaji ostaju. Vraća se istim dugmetom.
 
 ### Popis uživo
 

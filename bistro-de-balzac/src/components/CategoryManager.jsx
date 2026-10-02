@@ -65,6 +65,27 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
     onChanged()
   }
 
+  /**
+   * Sakriva ili vraća celu grupu. Sakrivena se ne prikazuje radnicima u
+   * popisu, ali artikli i stari izveštaji ostaju netaknuti.
+   */
+  async function toggleActive(category) {
+    setWorking(true)
+    const { error } = await supabase
+      .from('categories')
+      .update({ is_active: !category.is_active })
+      .eq('id', category.id)
+    setWorking(false)
+
+    if (error) return toast.error(errorMessage(error))
+    toast.success(
+      category.is_active
+        ? `„${category.name}“ je sakrivena iz popisa.`
+        : `„${category.name}“ je vraćena u popis.`,
+    )
+    onChanged()
+  }
+
   /** Zamenjuje mesta sa susednom kategorijom. */
   async function move(index, direction) {
     const target = index + direction
@@ -123,7 +144,13 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
             {categories.map((category, index) => {
               const used = countIn(category.name)
               return (
-                <li key={category.id} className="flex items-center gap-2 px-2.5 py-2">
+                <li
+                  key={category.id}
+                  className={cx(
+                    'flex items-center gap-2 px-2.5 py-2',
+                    !category.is_active && 'opacity-60',
+                  )}
+                >
                   <div className="flex shrink-0 flex-col">
                     <button
                       type="button"
@@ -151,9 +178,19 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
                     </p>
                     <p className="text-xs text-stone-400">
                       {countLabel(used, 'artikal')}
+                      {!category.is_active && ' · sakrivena'}
                     </p>
                   </div>
 
+                  {/* Sakrivena grupa se ne vidi u popisu — artikli ostaju. */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={working}
+                    onClick={() => toggleActive(category)}
+                  >
+                    {category.is_active ? 'Sakrij' : 'Vrati'}
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"

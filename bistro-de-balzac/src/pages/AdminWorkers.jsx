@@ -199,25 +199,39 @@ export default function AdminWorkers() {
    * Menja se samo redosled aktivnih — neaktivni stoje na dnu, iza dugmeta.
    */
   async function moveWorker(index, dir) {
-    const a = activeRows[index]?.person
-    const b = activeRows[index + dir]?.person
-    if (!a || !b) return
+    const target = index + dir
+    if (target < 0 || target >= activeRows.length) return
+
+    // Radnik se izvadi i ubaci na novo mesto, pa se CEO spisak prebroji na
+    // 10, 20, 30… Zamena samo dva broja ne bi radila ako su zatečeni radnici
+    // svi sa istim redosledom — tada bi zamena bila 1000 za 1000.
+    const poredak = activeRows.map((r) => r.person)
+    const [moved] = poredak.splice(index, 1)
+    poredak.splice(target, 0, moved)
+
+    const novi = new Map(poredak.map((p, i) => [p.id, (i + 1) * 10]))
 
     // Odmah na ekranu, pa u bazu — da spisak ne „poskoči“ posle odgovora.
     setPeople((prev) =>
-      prev.map((p) => {
-        if (p.id === a.id) return { ...p, sort_order: b.sort_order }
-        if (p.id === b.id) return { ...p, sort_order: a.sort_order }
-        return p
-      }),
+      prev
+        .map((p) => (novi.has(p.id) ? { ...p, sort_order: novi.get(p.id) } : p))
+        .sort(
+          (x, y) =>
+            x.sort_order - y.sort_order ||
+            String(x.full_name).localeCompare(String(y.full_name)),
+        ),
     )
 
-    const [r1, r2] = await Promise.all([
-      supabase.from('profiles').update({ sort_order: b.sort_order }).eq('id', a.id),
-      supabase.from('profiles').update({ sort_order: a.sort_order }).eq('id', b.id),
-    ])
-    if (r1.error || r2.error) {
-      toast.error(errorMessage(r1.error || r2.error, 'Redosled nije sačuvan.'))
+    const izmene = poredak.filter((p) => p.sort_order !== novi.get(p.id))
+    const res = await Promise.all(
+      izmene.map((p) =>
+        supabase.from('profiles').update({ sort_order: novi.get(p.id) }).eq('id', p.id),
+      ),
+    )
+
+    const greska = res.find((r) => r.error)
+    if (greska) {
+      toast.error(errorMessage(greska.error, 'Redosled nije sačuvan.'))
       load()
     }
   }

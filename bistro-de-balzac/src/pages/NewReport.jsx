@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast, useToastOffset } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { buildStoragePath, compressImage } from '../lib/image'
-import { categoryComparator, loadCategories } from '../lib/categories'
+import { categoryComparator, hiddenCategoryNames, loadCategories } from '../lib/categories'
 import { dailyTaskFor } from '../lib/rules'
 import Avatar from '../components/Avatar'
 import RuleText from '../components/RuleText'
@@ -49,7 +49,23 @@ const SAVE_DEBOUNCE_MS = 600
  * U bazi se čuvaju i prodato (qty_sold) i krajnje stanje (qty_end) — krajnje
  * se računa iz prodatog, a formula zavisi od toga da li je artikal brojač.
  */
-const EMPTY_ROW = { s: '', d: '', p: '' }
+const EMPTY_ROW = { s: '', d: '', p: '', e: '' }
+
+/**
+ * Način popisa artikla.
+ *
+ *   zalihe   upisuje se PRODATO    krajnje = (početno + dodato) − prodato
+ *   brojac   upisuje se PRODATO    krajnje = početno + prodato      (espresso)
+ *   krajnje  upisuje se KRAJNJE    prodato = (početno + dodato) − krajnje (voće)
+ *
+ * `is_counter` je stariji način zapisa — poštuje se zbog baza u kojima još
+ * nije pokrenuta skripta sa `count_mode`.
+ */
+function modeOf(item) {
+  if (item?.count_mode === 'brojac' || item?.count_mode === 'krajnje') return item.count_mode
+  if (item?.count_mode === 'zalihe') return 'zalihe'
+  return item?.is_counter ? 'brojac' : 'zalihe'
+}
 
 const COLUMNS = [
   { key: 's', short: 'Poč.', label: 'Početno stanje' },
@@ -73,27 +89,27 @@ function toDb(value) {
   return Number.isFinite(num) && num >= 0 ? num : null
 }
 
-/**
- * Krajnje stanje.
- *
- *   zalihe   →  (početno + dodato) − prodato
- *   brojač   →  početno + prodato
- *
- * Brojač je artikal kod koga kasa broji unapred (espresso): ako je na početku
- * smene bilo 5, a prodato 5, na kraju smene stoji 10.
- */
-function endOf(row, counter = false) {
-  const start = parseNumber(row.s)
-  const sold = parseNumber(row.p)
-  return counter ? round2(start + sold) : round2(start + parseNumber(row.d) - sold)
+/** Prodato — kod „krajnje“ se računa, inače ga radnik upisuje. */
+function soldOf(row, mode) {
+  if (mode !== 'krajnje') return parseNumber(row.p)
+  return round2(parseNumber(row.s) + parseNumber(row.d) - parseNumber(row.e))
 }
 
-/** Red iz baze u polja popisa (početno, dodato, prodato). */
-function rowFromDb(dbRow) {
+/** Krajnje stanje — kod „krajnje“ ga radnik upisuje, inače se računa. */
+function endOf(row, mode) {
+  if (mode === 'krajnje') return parseNumber(row.e)
+  const start = parseNumber(row.s)
+  const sold = parseNumber(row.p)
+  return mode === 'brojac' ? round2(start + sold) : round2(start + parseNumber(row.d) - sold)
+}
+
+/** Red iz baze u polja popisa. */
+function rowFromDb(dbRow, mode) {
   return {
     s: toField(dbRow.qty_start),
     d: toField(dbRow.qty_added),
-    p: toField(dbRow.qty_sold),
+    p: mode === 'krajnje' ? '' : toField(dbRow.qty_sold),
+    e: mode === 'krajnje' ? toField(dbRow.qty_end) : '',
   }
 }
 
@@ -127,14 +143,24 @@ function terminalReportOf(shift) {
 }
 
 /**
- * Popisan artikal = upisano mu je BILO ŠTA.
+ * Dirnut artikal = upisano mu je BILO ŠTA.
  *
- * Početno stanje se upisuje na početku smene, a prodato tek na kraju i samo
- * ako je artikal uopšte prodavan. Zato prazno „prodato“ znači NULA prodatih,
- * a ne „nije popisano“ — artikal kome je upisano početno je popisan.
+ * Ništa nije obavezno: početno se upisuje na početku smene, prodato na kraju
+ * i samo ako je artikal prodavan. Prazno „prodato“ znači NULA prodatih, pa
+ * krajnje ostaje jednako novom. Artikal koji niko nije dirao se ne upisuje —
+ * u izveštaju ostaje crtica, a ne nula.
  */
 const isDone = (row) =>
-  (row?.s ?? '') !== '' || (row?.d ?? '') !== '' || (row?.p ?? '') !== ''
+  (row?.s ?? '') !== '' ||
+  (row?.d ?? '') !== '' ||
+  (row?.p ?? '') !== '' ||
+  (row?.e ?? '') !== ''
+
+/**
+ * Ništa nije obavezno. Artikal koji radnik nije dirao ostaje prazan — i u
+ * popisu i u izveštaju stoji crtica, a ne nula, da se vidi da nije ni brojan.
+ * Prazno „prodato“ znači nula prodatih, pa krajnje ostaje jednako novom.
+ */
 
 export default function NewReport() {
   const { profile } = useAuth()
@@ -219,7 +245,7 @@ export default function NewReport() {
       const [itemsRes, cats, peopleRes, rulesRes] = await Promise.all([
         supabase
           .from('items')
-          .select('id, name, category, unit, sort_order, is_counter')
+          .select('id, name, category, unit, sort_order, is_counter, count_mode')
           .eq('is_active', true)
           .order('sort_order', { ascending: true }),
         loadCategories().catch(() => []),
@@ -228,8 +254,10 @@ export default function NewReport() {
       ])
 
       if (!active) return
+      // Artikli iz sakrivenih grupa se ne popisuju — admin ih je sklonio.
+      const hidden = hiddenCategoryNames(cats)
       if (itemsRes.error) toast.error(errorMessage(itemsRes.error))
-      else setItems(itemsRes.data ?? [])
+      else setItems((itemsRes.data ?? []).filter((i) => !hidden.has(i.category)))
       setCategories(cats)
       setPeople(peopleRes.data ?? [])
       setRuleDocs(rulesRes.data ?? [])
@@ -380,7 +408,10 @@ export default function NewReport() {
 
       const next = {}
       for (const row of itemsRes.data ?? []) {
-        next[row.item_id] = rowFromDb(row)
+        next[row.item_id] = rowFromDb(
+          row,
+          modeOf(itemsRef.current.find((i) => i.id === row.item_id)),
+        )
       }
       setRows(next)
 
@@ -419,7 +450,11 @@ export default function NewReport() {
           setRows((prev) => {
             const next = { ...prev }
             if (payload.eventType === 'DELETE') delete next[itemId]
-            else next[itemId] = rowFromDb(payload.new)
+            else
+              next[itemId] = rowFromDb(
+                payload.new,
+                modeOf(itemsRef.current.find((i) => i.id === itemId)),
+              )
             return next
           })
         },
@@ -484,10 +519,12 @@ export default function NewReport() {
       const row = rowsRef.current[itemId] ?? EMPTY_ROW
       const blank = !isDone(row)
 
-      // Prodato veće od novog stanja → krajnje bi bilo negativno. Takav red se
-      // ne upisuje dok se ne ispravi (ostaje „neupisan“, pa ga kolega ne pregazi).
-      // Brojač nema to ograničenje — kod njega krajnje samo raste.
-      if (isDone(row) && endOf(row, item?.is_counter) < 0) return
+      const mode = modeOf(item)
+
+      // Prodato veće od novog stanja (ili krajnje veće od njega) — red se ne
+      // upisuje dok se ne ispravi, pa ga kolega ne pregazi. Brojač nema to
+      // ograničenje: kod njega krajnje samo raste.
+      if (isDone(row) && mode !== 'brojac' && soldOf(row, mode) < 0) return
 
       let error = null
       if (blank) {
@@ -507,12 +544,13 @@ export default function NewReport() {
             category: item.category,
             qty_start: toDb(row.s),
             qty_added: toDb(row.d),
-            // Prazno „prodato“ je nula prodatih — artikal koji nije prodavan
-            // radnik ostavlja prazan. Krajnje stanje se računa iz prodatog,
-            // kod brojača po svojoj formuli (početno + prodato).
-            qty_sold: parseNumber(row.p),
-            qty_end: endOf(row, item.is_counter),
-            is_counter: !!item.is_counter,
+            // Prazno polje je nula — artikal koji nije prodavan radnik
+            // ostavlja prazan. Šta se upisuje a šta računa zavisi od načina
+            // popisa (zalihe, brojač ili krajnje stanje).
+            qty_sold: soldOf(row, mode),
+            qty_end: endOf(row, mode),
+            is_counter: mode === 'brojac',
+            count_mode: mode,
           },
           { onConflict: 'report_id,item_id' },
         ))
@@ -741,7 +779,11 @@ export default function NewReport() {
 
   /** Artikli kod kojih je prodato veće od novog stanja — greška u unosu. */
   const errorCount = useMemo(
-    () => items.filter((i) => isDone(rows[i.id]) && endOf(rows[i.id], i.is_counter) < 0).length,
+    () =>
+      items.filter(
+        (i) =>
+          isDone(rows[i.id]) && modeOf(i) !== 'brojac' && soldOf(rows[i.id] ?? EMPTY_ROW, modeOf(i)) < 0,
+      ).length,
     [items, rows],
   )
 
@@ -825,6 +867,7 @@ export default function NewReport() {
   /* ------------------------------------------------------------ */
   function validate() {
     if (!reportId) return 'Prvo uđi u smenu.'
+    // Ništa nije obavezno po artiklu — samo da popis ne ostane sasvim prazan.
     if (doneCount === 0) return 'Popiši bar jedan artikal.'
     if (errorCount > 0) {
       return `Kod ${countLabel(errorCount, 'artikla')} je prodato veće od novog stanja. Ispravi pa zatvori smenu.`
@@ -854,6 +897,10 @@ export default function NewReport() {
     setSubmitting(true)
     try {
       await flushPending()
+
+      /* Artikal koji radnik nije dirao se NE upisuje — u izveštaju ostaje
+         crtica, pa se vidi da nije ni brojan. Nula bi značila da je brojan i
+         da ga nema. */
 
       const { error } = await supabase
         .from('shift_reports')
@@ -1233,12 +1280,17 @@ export default function NewReport() {
                 {open &&
                   categoryItems.map((item) => {
                     const row = rows[item.id] ?? EMPTY_ROW
+                    // Zeleno čim je nešto upisano; netaknut red ostaje beo.
                     const done = isDone(row)
-                    // Brojač (espresso): krajnje = početno + prodato, i nema
-                    // „dodato“ — kasa broji unapred, ne popisuju se zalihe.
-                    const counter = !!item.is_counter
-                    const end = endOf(row, counter) // krajnje stanje, računa se
-                    const bad = done && end < 0
+                    /* Način popisa određuje šta se upisuje a šta računa:
+                       brojač (espresso) nema „dodato“, a kod „krajnje“ (voće)
+                       radnik upisuje krajnje, pa se prodato računa. */
+                    const mode = modeOf(item)
+                    const counter = mode === 'brojac'
+                    const endInput = mode === 'krajnje'
+                    const end = endOf(row, mode)
+                    const sold = soldOf(row, mode)
+                    const bad = done && mode !== 'brojac' && sold < 0
 
                     return (
                       <div
@@ -1255,21 +1307,37 @@ export default function NewReport() {
                           <p className="text-xs text-stone-400">
                             {item.unit}
                             {counter && ' · brojač'}
+                            {endInput && ' · upisuje se krajnje'}
                           </p>
                         </div>
 
                         <div className="ml-auto flex items-center gap-1.5">
-                          {COLUMNS.map((c) =>
-                            /* Brojač nema „dodato“ — ništa se ne dopunjava. */
-                            counter && c.key === 'd' ? (
-                              <span
-                                key={c.key}
-                                className="w-[78px] text-center text-sm text-stone-300"
-                                aria-hidden="true"
-                              >
-                                —
-                              </span>
-                            ) : (
+                          {COLUMNS.map((c) => {
+                            /* Brojač nema „dodato“ — ništa se ne dopunjava.
+                               Kod „krajnje“ se prodato ne kuca nego računa. */
+                            const prazno = counter && c.key === 'd'
+                            const racunato = endInput && c.key === 'p'
+
+                            if (prazno || racunato) {
+                              return (
+                                <span
+                                  key={c.key}
+                                  className={cx(
+                                    'w-[78px] text-center text-base font-bold tabular-nums',
+                                    racunato && done
+                                      ? bad
+                                        ? 'text-rose-600'
+                                        : 'text-stone-500'
+                                      : 'text-stone-300',
+                                  )}
+                                  title={racunato ? 'Prodato = (početno + dodato) − krajnje' : undefined}
+                                >
+                                  {racunato && done ? formatQty(sold) : '—'}
+                                </span>
+                              )
+                            }
+
+                            return (
                               <input
                                 key={c.key}
                                 type="number"
@@ -1290,27 +1358,52 @@ export default function NewReport() {
                                       : 'border-stone-300 bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30',
                                 )}
                               />
-                            ),
-                          )}
+                            )
+                          })}
 
-                          <span
-                            className={cx(
-                              'w-[70px] shrink-0 text-right text-base font-extrabold tabular-nums',
-                              bad ? 'text-rose-600' : done ? 'text-stone-900' : 'text-stone-300',
-                            )}
-                            title={
-                              counter
-                                ? 'Brojač: krajnje stanje = početno + prodato'
-                                : 'Krajnje stanje = (početno + dodato) − prodato'
-                            }
-                          >
-                            {done ? formatQty(end) : '—'}
-                          </span>
+                          {/* Kod „krajnje“ je ovo polje za unos, inače računat broj. */}
+                          {endInput ? (
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              min="0"
+                              placeholder="0"
+                              aria-label={`${item.name} — Krajnje stanje`}
+                              value={row.e}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => setCell(item.id, 'e', e.target.value)}
+                              className={cx(
+                                'w-[70px] shrink-0 rounded-lg border px-1.5 py-2.5 text-center text-base font-bold tabular-nums outline-none transition',
+                                bad
+                                  ? 'border-rose-400 bg-white text-rose-700 focus:ring-2 focus:ring-rose-500/30'
+                                  : row.e !== ''
+                                    ? 'border-emerald-400 bg-white text-emerald-800 focus:ring-2 focus:ring-emerald-500/30'
+                                    : 'border-stone-300 bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30',
+                              )}
+                            />
+                          ) : (
+                            <span
+                              className={cx(
+                                'w-[70px] shrink-0 text-right text-base font-extrabold tabular-nums',
+                                bad ? 'text-rose-600' : done ? 'text-stone-900' : 'text-stone-300',
+                              )}
+                              title={
+                                counter
+                                  ? 'Brojač: krajnje stanje = početno + prodato'
+                                  : 'Krajnje stanje = (početno + dodato) − prodato'
+                              }
+                            >
+                              {done ? formatQty(end) : '—'}
+                            </span>
+                          )}
                         </div>
 
                         {bad && (
                           <p className="w-full text-xs font-medium text-rose-600">
-                            Prodato je veće od novog stanja (
+                            {endInput
+                              ? 'Krajnje je veće od novog stanja ('
+                              : 'Prodato je veće od novog stanja ('}
                             {formatQty(parseNumber(row.s) + parseNumber(row.d))}). Proveri unos.
                           </p>
                         )}

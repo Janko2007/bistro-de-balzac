@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
-import { categoryComparator, loadCategories } from '../lib/categories'
+import { categoryComparator, hiddenCategoryNames, loadCategories } from '../lib/categories'
 import CategoryManager from '../components/CategoryManager'
 import ItemSalesReport from '../components/ItemSalesReport'
 import { blankFields, heading, printDocument, table } from '../lib/print'
@@ -31,8 +31,20 @@ const emptyForm = {
   unit: 'kom',
   sort_order: 100,
   is_active: true,
-  is_counter: false,
+  count_mode: 'zalihe',
 }
+
+/** Način popisa — starije baze imaju samo `is_counter`. */
+const modeOf = (item) =>
+  item?.count_mode === 'brojac' || item?.count_mode === 'krajnje'
+    ? item.count_mode
+    : item?.count_mode === 'zalihe'
+      ? 'zalihe'
+      : item?.is_counter
+        ? 'brojac'
+        : 'zalihe'
+
+const MODE_LABEL = { brojac: 'brojač', krajnje: 'krajnje stanje' }
 
 export default function AdminItems() {
   const toast = useToast()
@@ -74,6 +86,9 @@ export default function AdminItems() {
 
   const catNames = useMemo(() => categories.map((c) => c.name), [categories])
   const compareCats = useMemo(() => categoryComparator(categories), [categories])
+  /* Sakrivene grupe se i ovde vide, samo su označene — da znaš šta radnik ne
+     dobija u popisu. Vraćaju se kroz „Kategorije“. */
+  const hiddenCats = useMemo(() => hiddenCategoryNames(categories), [categories])
 
   /* Kategorije su zatvorene dok se ne kliknu; pretraga ih privremeno otvara. */
   const searching = search.trim() !== ''
@@ -192,7 +207,7 @@ export default function AdminItems() {
       unit: item.unit,
       sort_order: item.sort_order,
       is_active: item.is_active,
-      is_counter: !!item.is_counter,
+      count_mode: modeOf(item),
     })
     setModalOpen(true)
   }
@@ -212,7 +227,10 @@ export default function AdminItems() {
       unit: form.unit,
       sort_order: Number(form.sort_order) || 100,
       is_active: form.is_active,
-      is_counter: !!form.is_counter,
+      count_mode: form.count_mode,
+      // Starija kolona se i dalje puni, da popis radi i ako skripta sa
+      // `count_mode` još nije pokrenuta.
+      is_counter: form.count_mode === 'brojac',
     }
 
     const { error } = form.id
@@ -375,8 +393,15 @@ export default function AdminItems() {
                   open={isCatOpen(category)}
                   onToggle={() => toggleCat(category)}
                   right={
-                    <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-bold tabular-nums text-stone-500 ring-1 ring-inset ring-stone-300">
-                      {catItems.length}
+                    <span className="flex shrink-0 items-center gap-2">
+                      {hiddenCats.has(category) && (
+                        <span className="rounded-full bg-stone-200 px-2 py-0.5 text-[11px] font-semibold text-stone-600">
+                          sakrivena
+                        </span>
+                      )}
+                      <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold tabular-nums text-stone-500 ring-1 ring-inset ring-stone-300">
+                        {catItems.length}
+                      </span>
                     </span>
                   }
                 />
@@ -399,9 +424,9 @@ export default function AdminItems() {
                               isključen
                             </Badge>
                           )}
-                          {item.is_counter && (
+                          {MODE_LABEL[modeOf(item)] && (
                             <Badge className="bg-brand-50 text-brand-700 ring-brand-600/20">
-                              brojač
+                              {MODE_LABEL[modeOf(item)]}
                             </Badge>
                           )}
                         </div>
@@ -577,22 +602,51 @@ export default function AdminItems() {
             Aktivan (prikazuje se radnicima u popisu)
           </label>
 
-          {/* Brojač: kasa broji unapred (espresso), pa se krajnje stanje
-              računa kao početno + prodato, a ne kao kod zaliha. */}
-          <label className="flex items-start gap-2 text-sm font-medium text-stone-700">
-            <input
-              type="checkbox"
-              checked={form.is_counter}
-              onChange={(e) => setForm((f) => ({ ...f, is_counter: e.target.checked }))}
-              className="mt-0.5 h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500"
-            />
-            <span>
-              Broji unapred (brojač)
-              <span className="mt-0.5 block text-[12px] font-normal text-stone-400">
-                Krajnje = početno + prodato. Za espresso i slično, gde brojač samo raste.
-              </span>
-            </span>
-          </label>
+          {/* Način popisa — određuje šta radnik upisuje, a šta se računa. */}
+          <div>
+            <span className="label">Način popisa</span>
+            <div className="space-y-1.5">
+              {[
+                ['zalihe', 'Zalihe', 'Upisuje se prodato. Krajnje = (početno + dodato) − prodato.'],
+                ['brojac', 'Brojač', 'Upisuje se prodato. Krajnje = početno + prodato (espresso).'],
+                [
+                  'krajnje',
+                  'Krajnje stanje',
+                  'Upisuje se krajnje. Prodato = (početno + dodato) − krajnje (voće).',
+                ],
+              ].map(([value, title, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, count_mode: value }))}
+                  aria-pressed={form.count_mode === value}
+                  className={cx(
+                    'flex w-full items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition',
+                    form.count_mode === value
+                      ? 'border-brand-500 bg-brand-50'
+                      : 'border-stone-200 bg-white hover:bg-stone-50',
+                  )}
+                >
+                  <span
+                    className={cx(
+                      'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                      form.count_mode === value
+                        ? 'border-brand-600 bg-brand-600'
+                        : 'border-stone-300 bg-white',
+                    )}
+                  >
+                    {form.count_mode === value && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                    )}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-stone-900">{title}</span>
+                    <span className="block text-[12px] text-stone-400">{hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="flex gap-2 pt-2">
             <Button

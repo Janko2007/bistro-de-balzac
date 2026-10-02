@@ -401,7 +401,7 @@ export default function ReportDetail() {
         rows.push({
           muted: item.missing,
           cells: [
-            item.missing ? `${item.item_name} — nije popisano` : item.item_name,
+            item.item_name,
             item.unit,
             formatQty(item.qty_start),
             // Brojač se ne dopunjava — te dve kolone kod njega nemaju smisla.
@@ -679,7 +679,9 @@ export default function ReportDetail() {
           </div>
         )}
 
-        {(report.admin_note || isAdmin) && !lockedForWorker && (
+        {/* Poruku radnik vidi UVEK — i pošto je popis potvrđen. Zbog nje se
+            poruka i piše; sakrivanje iznosa je ne dira. */}
+        {(report.admin_note || (isAdmin && !lockedForWorker)) && (
           <div
             className={cx(
               'border-t border-stone-200 px-4 py-3',
@@ -878,11 +880,6 @@ export default function ReportDetail() {
                                   {item.item_name}
                                 </span>
                                 <span className="ml-1.5 text-xs text-stone-400">{item.unit}</span>
-                                {item.missing && (
-                                  <span className="ml-2 text-[11px] font-semibold text-amber-700">
-                                    nije popisano
-                                  </span>
-                                )}
                               </td>
                               <td className="px-2 py-2 text-right tabular-nums text-stone-500">
                                 {formatQty(item.qty_start)}

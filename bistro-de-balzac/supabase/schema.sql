@@ -114,8 +114,12 @@ create table if not exists public.categories (
   id          uuid primary key default gen_random_uuid(),
   name        text    not null,
   sort_order  integer not null default 1000,
+  -- Sakrivena grupa se ne prikazuje u popisu; artikli ostaju u bazi.
+  is_active   boolean not null default true,
   created_at  timestamptz not null default now()
 );
+
+alter table public.categories add column if not exists is_active boolean not null default true;
 
 create unique index if not exists categories_name_unique_idx on public.categories (lower(name));
 create index if not exists categories_order_idx on public.categories (sort_order);
@@ -128,13 +132,18 @@ create table if not exists public.items (
   unit        text        not null default 'kom',   -- kom, l, kg, flaša...
   sort_order  integer     not null default 100,
   is_active   boolean     not null default true,
-  -- Brojač (espresso): kasa broji unapred, pa je krajnje = početno + prodato,
-  -- a ne (početno + dodato) − prodato kao kod zaliha.
-  is_counter  boolean     not null default false,
+  -- Način popisa:
+  --   zalihe   upisuje se PRODATO    krajnje = (početno + dodato) − prodato
+  --   brojac   upisuje se PRODATO    krajnje = početno + prodato  (espresso)
+  --   krajnje  upisuje se KRAJNJE    prodato = (početno + dodato) − krajnje (voće)
+  count_mode  text        not null default 'zalihe'
+                check (count_mode in ('zalihe', 'brojac', 'krajnje')),
+  is_counter  boolean     not null default false,   -- zadržano zbog starijih baza
   created_at  timestamptz not null default now()
 );
 
 alter table public.items add column if not exists is_counter boolean not null default false;
+alter table public.items add column if not exists count_mode text not null default 'zalihe';
 
 create unique index if not exists items_name_unique_idx on public.items (lower(name));
 create index if not exists items_category_idx on public.items (category, sort_order);
@@ -297,6 +306,9 @@ alter table public.shift_report_items
 
 alter table public.shift_report_items
   add column if not exists is_counter boolean not null default false;
+
+alter table public.shift_report_items
+  add column if not exists count_mode text not null default 'zalihe';
 
 create index if not exists shift_report_items_report_idx on public.shift_report_items (report_id);
 
@@ -1202,6 +1214,8 @@ select
   r.created_at,
   r.created_by,
   p.full_name as created_by_name,
+  -- Da radnik u spisku odmah vidi gde ga čeka poruka od admina.
+  coalesce(r.admin_note, '') <> ''                                           as has_admin_note,
   (select count(*) from public.report_images i where i.report_id = r.id)      as image_count,
   (select count(*) from public.shift_report_items si where si.report_id = r.id) as item_count,
   -- Svi koji su radili smenu — da filter „radnik“ nađe i smene koje nije on otvorio.
