@@ -49,7 +49,8 @@ export default function InstallPrompt() {
   if (!deferred && !showIosHint) return null
 
   return (
-    <div className="fixed inset-x-3 bottom-20 z-40 animate-slide-up rounded-2xl border border-stone-200 bg-white p-4 shadow-xl lg:inset-x-auto lg:right-5 lg:bottom-5 lg:max-w-sm">
+    // Iznad donje navigacije, uz prostor za crtu za gašenje na iPhone-u.
+    <div className="fixed inset-x-3 bottom-[calc(72px+env(safe-area-inset-bottom,0px))] z-40 animate-slide-up rounded-2xl border border-stone-200 bg-white p-4 shadow-xl lg:inset-x-auto lg:bottom-5 lg:right-5 lg:max-w-sm">
       <div className="flex items-start gap-3">
         <img src="/icons/icon-192.png" alt="" className="h-10 w-10 shrink-0 rounded-xl" />
         <div className="min-w-0 flex-1">

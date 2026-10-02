@@ -75,7 +75,7 @@ export default function ReportDetail() {
         staff:shift_report_staff ( wage_override, profile:profiles ( id, full_name, pay_model, daily_wage ) ),
         items:shift_report_items (
           id, item_id, item_name, unit, category,
-          qty_start, qty_added, qty_new, qty_sold, qty_end, note
+          qty_start, qty_added, qty_new, qty_sold, qty_end, is_counter, note
         ),
         images:report_images ( id, storage_path, created_at )
       `,
@@ -134,7 +134,7 @@ export default function ReportDetail() {
       .catch(() => setCategories([]))
     supabase
       .from('items')
-      .select('id, name, category, unit, sort_order, is_active, created_at')
+      .select('id, name, category, unit, sort_order, is_active, is_counter, created_at')
       .order('sort_order', { ascending: true })
       .then(({ data }) => setCatalog(data ?? []))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -172,6 +172,7 @@ export default function ReportDetail() {
         qty_new: null,
         qty_sold: null,
         qty_end: null,
+        is_counter: !!c.is_counter,
         missing: true,
         sort: c.sort_order,
       })
@@ -400,11 +401,12 @@ export default function ReportDetail() {
         rows.push({
           muted: item.missing,
           cells: [
-            item.missing ? `${item.item_name} — nije popisano` : item.item_name,
+            item.item_name,
             item.unit,
             formatQty(item.qty_start),
-            formatQty(item.qty_added),
-            formatQty(item.qty_new),
+            // Brojač se ne dopunjava — te dve kolone kod njega nemaju smisla.
+            item.is_counter ? '—' : formatQty(item.qty_added),
+            item.is_counter ? '—' : formatQty(item.qty_new),
             { value: formatQty(item.qty_sold), strong: !item.missing },
             formatQty(item.qty_end),
           ],
@@ -510,7 +512,7 @@ export default function ReportDetail() {
   const staffNames = staffList.map((s) => s.profile.full_name)
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4 pb-28">
       {/* ---------- Zaglavlje ---------- */}
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3 p-4">
@@ -677,7 +679,9 @@ export default function ReportDetail() {
           </div>
         )}
 
-        {(report.admin_note || isAdmin) && !lockedForWorker && (
+        {/* Poruku radnik vidi UVEK — i pošto je popis potvrđen. Zbog nje se
+            poruka i piše; sakrivanje iznosa je ne dira. */}
+        {(report.admin_note || (isAdmin && !lockedForWorker)) && (
           <div
             className={cx(
               'border-t border-stone-200 px-4 py-3',
@@ -783,12 +787,13 @@ export default function ReportDetail() {
           }
         />
 
-        {/* Filter: svi artikli / nije popisano / popisano, a nije prodato */}
+        {/* Filter: svi artikli / popisano, a nije prodato.
+            „Nije popisano“ se ne nabraja — prodato se upisuje samo za ono što
+            je prodavano, pa prazno polje nije greška. */}
         {groupedItems.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-b border-stone-100 px-4 py-2.5">
             {[
               ['sve', 'Svi artikli'],
-              ['nepopisano', 'Nije popisano'],
               ['nije', 'Nije prodato'],
             ].map(([key, label]) => (
               <button
@@ -813,9 +818,7 @@ export default function ReportDetail() {
           <p className="px-4 py-8 text-center text-sm text-stone-500">Popis je prazan.</p>
         ) : visibleGroups.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-stone-500">
-            {itemFilter === 'nepopisano'
-              ? 'Popisani su svi artikli.'
-              : 'Svaki popisan artikal je prodat bar jednom.'}
+            Svaki popisan artikal je prodat bar jednom.
           </p>
         ) : (
           <div className="divide-y divide-stone-100">
@@ -823,7 +826,6 @@ export default function ReportDetail() {
               // U filtriranom prikazu kategorije su odmah otvorene — da se vidi šta je izdvojeno.
               const open = itemFilter !== 'sve' || openCats.has(category)
               const catSold = catItems.reduce((s, i) => s + Number(i.qty_sold ?? 0), 0)
-              const catMissing = catItems.filter((i) => i.missing).length
 
               return (
                 <div key={category}>
@@ -834,11 +836,6 @@ export default function ReportDetail() {
                     right={
                       itemFilter === 'sve' ? (
                         <span className="flex shrink-0 items-center gap-2">
-                          {catMissing > 0 && (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-                              {catMissing} nepopisano
-                            </span>
-                          )}
                           <span className="text-xs font-semibold tabular-nums text-stone-500">
                             prodato {formatQty(catSold)}
                           </span>
@@ -883,20 +880,17 @@ export default function ReportDetail() {
                                   {item.item_name}
                                 </span>
                                 <span className="ml-1.5 text-xs text-stone-400">{item.unit}</span>
-                                {item.missing && (
-                                  <span className="ml-2 text-[11px] font-semibold text-amber-700">
-                                    nije popisano
-                                  </span>
-                                )}
                               </td>
                               <td className="px-2 py-2 text-right tabular-nums text-stone-500">
                                 {formatQty(item.qty_start)}
                               </td>
+                              {/* Brojač se ne dopunjava — „dodato“ i „novo
+                                  stanje“ kod njega nemaju smisla. */}
                               <td className="px-2 py-2 text-right tabular-nums text-stone-500">
-                                {formatQty(item.qty_added)}
+                                {item.is_counter ? '—' : formatQty(item.qty_added)}
                               </td>
                               <td className="px-2 py-2 text-right tabular-nums text-stone-500">
-                                {formatQty(item.qty_new)}
+                                {item.is_counter ? '—' : formatQty(item.qty_new)}
                               </td>
                               <td
                                 className={cx(
@@ -928,9 +922,13 @@ export default function ReportDetail() {
         </>
       )}
 
-      {/* ---------- Radnje admina ---------- */}
+      {/* ---------- Radnje admina ----------
+          Traka stoji tačno iznad donje navigacije. Na iPhone-u je navigacija
+          viša za prostor iznad crte za gašenje aplikacije — bez
+          `safe-area-inset-bottom` traka bi upala pod nju. Na računaru nema
+          navigacije, pa ide na dno, sa malo vazduha ispod dugmadi. */}
       {isAdmin && (
-        <div className="fixed inset-x-0 bottom-[60px] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:safe-bottom">
+        <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
             {report.status !== 'potvrdjen' ? (
               <Button
@@ -1187,8 +1185,10 @@ export default function ReportDetail() {
         }
       >
         <p className="text-sm text-stone-600">
-          Popis odmah nestaje sa spiskova i iz obračuna, ali se čuva još{' '}
-          <strong>12 sati</strong> — do tada možeš da ga vratiš u{' '}
+          Sa njim nestaje i njegov <strong>pazar</strong> — iz Pregleda, iz Uplata i iz dnevnica.
+        </p>
+        <p className="mt-2 text-[13px] text-stone-400">
+          Čuva se još <strong>12 sati</strong> — do tada ga vraćaš u{' '}
           <strong>Pregled → Obrisani popisi</strong>. Posle toga se briše trajno, zajedno sa
           slikama.
         </p>

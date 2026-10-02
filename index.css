@@ -123,6 +123,18 @@
     pointer-events: none;
   }
 
+  /* Visina prozora koji iskače.
+     `vh` na telefonu računa i traku sa adresom, pa vrh prozora — a sa njim i
+     dugme × — ume da završi van ekrana. `dvh` meri ono što se stvarno vidi. */
+  .modal-panel {
+    max-height: 92vh;
+  }
+  @supports (height: 100dvh) {
+    .modal-panel {
+      max-height: 92dvh;
+    }
+  }
+
   /* Sitan naslov iznad grupe podataka */
   .eyebrow {
     @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400;

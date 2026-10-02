@@ -95,11 +95,15 @@ export default function MyEarnings() {
               <Stat label="Isplaćeno" value={formatMoney(calc.paid, false)} />
             </div>
 
-            <div className="mx-4 mb-4 flex items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3.5 text-white">
+            {/* Ako je primio više nego što je zaradio, piše se rečju — minus
+                uz „Imaš da primiš“ se čita kao greška. */}
+            <div className="mx-4 mb-4 flex items-center justify-between gap-3 rounded-2xl bg-ink px-4 py-3.5 text-white">
               <p className="eyebrow">
-                Imaš da primiš
+                {calc.balance < 0 ? 'Primio si više' : 'Imaš da primiš'}
               </p>
-              <p className="text-2xl font-extrabold tabular-nums">{formatMoney(calc.balance)}</p>
+              <p className="text-2xl font-extrabold tabular-nums">
+                {formatMoney(Math.abs(calc.balance), false)}
+              </p>
             </div>
 
             {calc.returned > 0 && (

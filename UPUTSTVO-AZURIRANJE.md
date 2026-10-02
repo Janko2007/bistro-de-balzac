@@ -24,7 +24,18 @@ Levo klikni **SQL Editor** → **New query**. Onda, jedan po jedan:
 | --- | --- | --- |
 | 1. | `AZURIRANJE-BAZE-2.sql` | prijava imenom i prezimenom, korpa, pravila |
 | 2. | `AZURIRANJE-BAZE-3.sql` | izbor *dnevnica / plata* i procenat |
-| 3. | `AZURIRANJE-BAZE-4.sql` | umanjena dnevnica za pojedini dan |
+| 3. | `AZURIRANJE-BAZE-4.sql` | umanjena dnevnica za dan + brisanje uplate |
+| 4. | `AZURIRANJE-BAZE-5.sql` | artikal sa brojačem (espresso) |
+| 5. | **`AZURIRANJE-BAZE-9-SVE.sql`** | redosled radnika, popis uživo, skrivanje grupa, način popisa i ispravka starih popisa |
+
+> **`AZURIRANJE-BAZE-9-SVE.sql` je skripte -6, -7 i -8 spojene u jednu**, pa ih
+> ne moraš pokretati posebno. Ako si neku već pokretao, svejedno — sve može
+> više puta, ništa se ne duplira. Fajlovi `-6`, `-7` i `-8` ostaju u paketu
+> samo zbog istorije.
+
+> U paketu je i **`POCETAK-ISPOCETKA.sql`** — on **briše sve popise, isplate i
+> uplate**, da kreneš od nule posle probe. Nije deo ažuriranja; pokreni ga
+> samo ako to zaista hoćeš, jer se ne može poništiti.
 
 Za svaki: otvori fajl iz ovog foldera, označi sve (**Ctrl + A**), kopiraj
 (**Ctrl + C**), nalepi u Supabase (**Ctrl + V**), klikni **Run**. Dole treba da
@@ -140,6 +151,78 @@ Zato:
 ---
 
 ## Šta je novo u ovoj verziji
+
+### Tri načina popisa
+
+Svaki artikal ima svoj način — biraš ga u **Artikli → Izmeni → Način popisa**:
+
+| Način | Radnik upisuje | Aplikacija računa |
+| --- | --- | --- |
+| **Zalihe** (podrazumevano) | prodato | krajnje = (početno + dodato) − prodato |
+| **Brojač** (espresso) | prodato | krajnje = početno + prodato |
+| **Krajnje stanje** (voće) | krajnje | prodato = (početno + dodato) − krajnje |
+
+Kolone u popisu ostaju iste, menja se samo koja se kuca. Kod voća polje
+**Kraj** postaje polje za unos, a **Prod.** prikazuje izračunat broj.
+
+### Prodato je neobavezno
+
+Početno stanje se upisuje na početku smene, prodato tek na kraju i **samo za
+ono što je prodavano**. Prazno prodato znači **nula prodatih**, pa krajnje
+stanje ostaje ono što je i bilo — *novo* (početno + dodato).
+
+Pri predaji smene sve što radnik nije dirao dobija **nule**, pa u izveštaju
+nema više „nepopisano“. Nestale su i žute oznake po kategorijama i upozorenje
+u redu artikla.
+
+### Skrivanje grupe artikala
+
+Osim pojedinačnog artikla (**Artikli → Isključi**), možeš da sakriješ i celu
+grupu: **Artikli → Kategorije → Sakrij**. Sakrivena grupa nestaje iz popisa, a
+artikli i stari izveštaji ostaju. Vraća se istim dugmetom.
+
+### Popis uživo
+
+Kad dvoje rade istu smenu, ono što jedan upiše drugom se pojavi **za sekundu,
+bez osvežavanja** — i brojevi u popisu, i pazar, i ko je ušao u smenu, i slike.
+Polje koje baš kucaš se ne dira, da ti se unos ne vrati unazad.
+
+Aplikacija je to radila od početka, ali Supabase to nije propuštao — nijedna
+ranija skripta nije uključila slanje izmena. Uključuje ga `AZURIRANJE-BAZE-6.sql`.
+
+> Provera: otvori isti popis na telefonu i na računaru, upiši broj na jednom —
+> na drugom se pojavi sam.
+
+### Redosled radnika
+
+Na ekranu **Radnici** svaki aktivan radnik ima **▲▼** levo od slike — njima ga
+podižeš ili spuštaš. Redosled se odmah pamti i važi za sve. Nov nalog ide na
+kraj spiska, pa ga odatle podigneš gde treba.
+
+### Nema više minusa u obračunu
+
+Kad je nekome isplaćeno više nego što je zaradio, umesto *„za isplatu −2.000"*
+piše **„pretplaćeno 2.000"**. Radniku na njegovom ekranu piše *„Primio si
+više"*. Ako je isplata greška, brišeš je u **Radnici → Isplati → ×**.
+
+### Artikal sa brojačem (espresso)
+
+Kod kafe kasa broji unapred — brojač samo raste. Zato takav artikal ima svoje
+računanje:
+
+```
+običan artikal  →  krajnje = (početno + dodato) − prodato
+brojač          →  krajnje = početno + prodato
+```
+
+Ako je na početku smene brojač bio **5**, a prodato je **5** kafa, na kraju
+smene piše **10**.
+
+Uključuje se u **Artikli → Izmeni** kod tog artikla → **„Broji unapred
+(brojač)"**. Posle toga u popisu kod njega nema polja *Dodato* (stoji crtica),
+a u spisku artikala nosi oznaku **brojač**.
+
+Uz to su **polja u popisu proširena**, da i petocifren broj brojača stane ceo.
 
 ### Međusmena ulazi i u prvu i u drugu smenu
 

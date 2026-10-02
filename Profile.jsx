@@ -4,12 +4,14 @@ import RuleDocs from '../components/RuleDocs'
 import { Card } from '../components/ui'
 import { formatDate, formatMoney } from '../lib/utils'
 import MyEarnings from './MyEarnings'
+import Team from './Team'
 
 /**
  * Profil radnika — redom:
  *   1. slika i osnovni podaci (ime, telefon, uloga, dnevnica)
  *   2. dnevnice (obračun, odrađene smene, bonusi i isplate)
- *   3. pravila i obaveze (svaki dokument zatvoren dok se ne klikne)
+ *   3. tim (ko je šta i ko ima koji bedž)
+ *   4. pravila i obaveze (svaki dokument zatvoren dok se ne klikne)
  */
 export default function Profile() {
   const { profile, isAdmin, refreshProfile } = useAuth()
@@ -61,6 +63,9 @@ export default function Profile() {
 
       {/* ---------- Dnevnice ---------- */}
       <MyEarnings />
+
+      {/* ---------- Tim ---------- */}
+      <Team />
 
       {/* ---------- Pravila i obaveze ---------- */}
       <RuleDocs />

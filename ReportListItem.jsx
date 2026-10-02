@@ -27,8 +27,16 @@ function ShiftTag({ shift }) {
  *
  * `compact` — samo datum, smena i stanje, bez iznosa (radnikov spisak);
  * iznosi se vide tek kad se izveštaj otvori.
+ *
+ * `staffNames` — svi koji su radili smenu. Bez njih bi stajalo samo ime onoga
+ * ko je prvi ušao u smenu, pa bi delovalo kao da je radio sam.
  */
-export default function ReportListItem({ report, showAuthor = false, compact = false }) {
+export default function ReportListItem({
+  report,
+  showAuthor = false,
+  compact = false,
+  staffNames = [],
+}) {
   // Radnikov spisak: jedan red, iste kolone u svakom — datum | smena | stanje.
   // Svi redovi su iste visine i sve stoji poravnato, pa 8 izveštaja stane na
   // ekran telefona bez pomeranja.
@@ -41,8 +49,14 @@ export default function ReportListItem({ report, showAuthor = false, compact = f
         <span className="whitespace-nowrap text-[13px] font-bold text-stone-900">
           {formatDate(report.report_date)}
         </span>
-        <span className="min-w-0">
+        <span className="flex min-w-0 items-center gap-1.5">
           <ShiftTag shift={report.shift} />
+          {/* Uz izveštaj stoji poruka od admina — da se vidi i bez otvaranja. */}
+          {report.has_admin_note && (
+            <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-800">
+              poruka
+            </span>
+          )}
         </span>
         {/* Manja oznaka nego inače, da i „Vraćen na ispravku“ stane u isti red. */}
         <Badge
@@ -81,9 +95,9 @@ export default function ReportListItem({ report, showAuthor = false, compact = f
         <span className="flex min-w-0 items-center justify-between gap-2.5">
           <span className="flex min-w-0 items-center gap-1.5">
             <ShiftTag shift={report.shift} />
-            {showAuthor && report.created_by_name && (
+            {showAuthor && (
               <span className="min-w-0 truncate text-[13.5px] font-semibold text-stone-900">
-                {report.created_by_name}
+                {staffNames.length > 0 ? staffNames.join(', ') : 'nema upisanih'}
               </span>
             )}
           </span>

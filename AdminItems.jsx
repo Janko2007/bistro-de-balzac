@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
-import { categoryComparator, loadCategories } from '../lib/categories'
+import { categoryComparator, hiddenCategoryNames, loadCategories } from '../lib/categories'
 import CategoryManager from '../components/CategoryManager'
 import ItemSalesReport from '../components/ItemSalesReport'
 import { blankFields, heading, printDocument, table } from '../lib/print'
@@ -31,7 +31,20 @@ const emptyForm = {
   unit: 'kom',
   sort_order: 100,
   is_active: true,
+  count_mode: 'zalihe',
 }
+
+/** Način popisa — starije baze imaju samo `is_counter`. */
+const modeOf = (item) =>
+  item?.count_mode === 'brojac' || item?.count_mode === 'krajnje'
+    ? item.count_mode
+    : item?.count_mode === 'zalihe'
+      ? 'zalihe'
+      : item?.is_counter
+        ? 'brojac'
+        : 'zalihe'
+
+const MODE_LABEL = { brojac: 'brojač', krajnje: 'krajnje stanje' }
 
 export default function AdminItems() {
   const toast = useToast()
@@ -73,6 +86,9 @@ export default function AdminItems() {
 
   const catNames = useMemo(() => categories.map((c) => c.name), [categories])
   const compareCats = useMemo(() => categoryComparator(categories), [categories])
+  /* Sakrivene grupe se i ovde vide, samo su označene — da znaš šta radnik ne
+     dobija u popisu. Vraćaju se kroz „Kategorije“. */
+  const hiddenCats = useMemo(() => hiddenCategoryNames(categories), [categories])
 
   /* Kategorije su zatvorene dok se ne kliknu; pretraga ih privremeno otvara. */
   const searching = search.trim() !== ''
@@ -87,20 +103,34 @@ export default function AdminItems() {
     })
   }
 
-  const grouped = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    const filtered = items
-      .filter((i) => showInactive || i.is_active)
-      .filter((i) => !term || i.name.toLowerCase().includes(term) || i.category.toLowerCase().includes(term))
+  /** Traženi pojam — isti filter za aktivne i za isključene. */
+  const matches = useCallback(
+    (item) => {
+      const term = search.trim().toLowerCase()
+      if (!term) return true
+      return (
+        item.name.toLowerCase().includes(term) || item.category.toLowerCase().includes(term)
+      )
+    },
+    [search],
+  )
 
+  const grouped = useMemo(() => {
     const map = new Map()
-    for (const item of filtered) {
+    for (const item of items.filter((i) => i.is_active && matches(i))) {
       if (!map.has(item.category)) map.set(item.category, [])
       map.get(item.category).push(item)
     }
     // Redosled kategorija je onaj koji je admin podesio.
     return Array.from(map.entries()).sort((a, b) => compareCats(a[0], b[0]))
-  }, [items, search, showInactive, compareCats])
+  }, [items, matches, compareCats])
+
+  /* Isključeni artikli ne stoje među aktivnima — sklonjeni su na dno, iza
+     dugmeta, odakle se jednim klikom vraćaju u popis. */
+  const inactiveItems = useMemo(
+    () => items.filter((i) => !i.is_active && matches(i)),
+    [items, matches],
+  )
 
   /** Aktivni artikli po kategorijama — osnova za obrazac koji se štampa. */
   const printableGroups = useMemo(() => {
@@ -177,6 +207,7 @@ export default function AdminItems() {
       unit: item.unit,
       sort_order: item.sort_order,
       is_active: item.is_active,
+      count_mode: modeOf(item),
     })
     setModalOpen(true)
   }
@@ -196,6 +227,10 @@ export default function AdminItems() {
       unit: form.unit,
       sort_order: Number(form.sort_order) || 100,
       is_active: form.is_active,
+      count_mode: form.count_mode,
+      // Starija kolona se i dalje puni, da popis radi i ako skripta sa
+      // `count_mode` još nije pokrenuta.
+      is_counter: form.count_mode === 'brojac',
     }
 
     const { error } = form.id
@@ -228,6 +263,11 @@ export default function AdminItems() {
     else {
       setItems((prev) =>
         prev.map((i) => (i.id === item.id ? { ...i, is_active: !i.is_active } : i)),
+      )
+      toast.success(
+        item.is_active
+          ? `${item.name} je isključen — nađeš ga dole pod „Isključeni“.`
+          : `${item.name} je vraćen u popis.`,
       )
     }
   }
@@ -335,15 +375,6 @@ export default function AdminItems() {
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 min-w-[180px]"
           />
-          <label className="flex shrink-0 items-center gap-2 text-sm font-medium text-stone-600">
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
-              className="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-500"
-            />
-            Prikaži isključene
-          </label>
         </div>
 
         {grouped.length === 0 ? (
@@ -362,8 +393,15 @@ export default function AdminItems() {
                   open={isCatOpen(category)}
                   onToggle={() => toggleCat(category)}
                   right={
-                    <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-bold tabular-nums text-stone-500 ring-1 ring-inset ring-stone-300">
-                      {catItems.length}
+                    <span className="flex shrink-0 items-center gap-2">
+                      {hiddenCats.has(category) && (
+                        <span className="rounded-full bg-stone-200 px-2 py-0.5 text-[11px] font-semibold text-stone-600">
+                          sakrivena
+                        </span>
+                      )}
+                      <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold tabular-nums text-stone-500 ring-1 ring-inset ring-stone-300">
+                        {catItems.length}
+                      </span>
                     </span>
                   }
                 />
@@ -386,6 +424,11 @@ export default function AdminItems() {
                               isključen
                             </Badge>
                           )}
+                          {MODE_LABEL[modeOf(item)] && (
+                            <Badge className="bg-brand-50 text-brand-700 ring-brand-600/20">
+                              {MODE_LABEL[modeOf(item)]}
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-stone-400">
                           {item.unit} · redosled {item.sort_order}
@@ -393,7 +436,7 @@ export default function AdminItems() {
                       </div>
 
                       <Button variant="ghost" size="sm" onClick={() => toggleActive(item)}>
-                        {item.is_active ? 'Isključi' : 'Uključi'}
+                        {item.is_active ? 'Isključi' : 'Vrati'}
                       </Button>
                       <Button variant="secondary" size="sm" onClick={() => openEdit(item)}>
                         Izmeni
@@ -411,6 +454,67 @@ export default function AdminItems() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ---------- Isključeni artikli ---------- */}
+        {inactiveItems.length > 0 && (
+          <div className="border-t border-stone-100">
+            <button
+              type="button"
+              onClick={() => setShowInactive((v) => !v)}
+              aria-expanded={showInactive}
+              className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition hover:bg-stone-50"
+            >
+              <svg
+                className={cx(
+                  'h-4 w-4 shrink-0 text-stone-400 transition-transform',
+                  showInactive && 'rotate-90',
+                )}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+              <span className="text-[13px] font-semibold text-stone-600">Isključeni</span>
+              <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-stone-500">
+                {inactiveItems.length}
+              </span>
+              <span className="ml-auto text-[12px] text-stone-400">
+                {showInactive ? 'sakrij' : 'prikaži'}
+              </span>
+            </button>
+
+            {showInactive && (
+              <div className="divide-y divide-stone-100 border-t border-stone-100">
+                {inactiveItems.map((item) => (
+                  <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 opacity-70">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-stone-800">{item.name}</p>
+                      <p className="text-xs text-stone-400">
+                        {item.category} · {item.unit}
+                      </p>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => toggleActive(item)}>
+                      Vrati u popis
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-rose-600"
+                      onClick={() => setConfirmDelete(item)}
+                    >
+                      Obriši
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         </>
@@ -497,6 +601,52 @@ export default function AdminItems() {
             />
             Aktivan (prikazuje se radnicima u popisu)
           </label>
+
+          {/* Način popisa — određuje šta radnik upisuje, a šta se računa. */}
+          <div>
+            <span className="label">Način popisa</span>
+            <div className="space-y-1.5">
+              {[
+                ['zalihe', 'Zalihe', 'Upisuje se prodato. Krajnje = (početno + dodato) − prodato.'],
+                ['brojac', 'Brojač', 'Upisuje se prodato. Krajnje = početno + prodato (espresso).'],
+                [
+                  'krajnje',
+                  'Krajnje stanje',
+                  'Upisuje se krajnje. Prodato = (početno + dodato) − krajnje (voće).',
+                ],
+              ].map(([value, title, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, count_mode: value }))}
+                  aria-pressed={form.count_mode === value}
+                  className={cx(
+                    'flex w-full items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition',
+                    form.count_mode === value
+                      ? 'border-brand-500 bg-brand-50'
+                      : 'border-stone-200 bg-white hover:bg-stone-50',
+                  )}
+                >
+                  <span
+                    className={cx(
+                      'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                      form.count_mode === value
+                        ? 'border-brand-600 bg-brand-600'
+                        : 'border-stone-300 bg-white',
+                    )}
+                  >
+                    {form.count_mode === value && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                    )}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-stone-900">{title}</span>
+                    <span className="block text-[12px] text-stone-400">{hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="flex gap-2 pt-2">
             <Button

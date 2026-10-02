@@ -68,6 +68,21 @@ export default defineConfig({
       },
     }),
   ],
+  /* Datum i vreme kad je verzija napravljena. Upisuje se u kod pri objavi, pa
+     se u aplikaciji (meni naloga) vidi da li je stigla nova verzija — bez
+     pogađanja da li pregledač drži staru kopiju. */
+  define: {
+    __BUILD_TIME__: JSON.stringify(
+      new Intl.DateTimeFormat('sr-Latn-RS', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Europe/Belgrade',
+      }).format(new Date()),
+    ),
+  },
   server: {
     host: true,
     port: 5173,

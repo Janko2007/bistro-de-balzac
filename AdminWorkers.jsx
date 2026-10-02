@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { EMPTY_STATS, loadWorkStats, settle } from '../lib/earnings'
+import { loadBadges, loadWorkerBadges, saveWorkerBadges } from '../lib/badges'
 import { currentPeriod, periodLabel } from '../lib/payperiod'
 import Avatar, { AvatarEditor } from '../components/Avatar'
 import PeriodPicker from '../components/PeriodPicker'
@@ -42,11 +43,20 @@ const emptyNew = {
   phone: '',
   password: '',
   role: 'radnik',
+  position: '',
   pay_model: 'dnevnica',
   daily_wage: '',
   monthly_salary: '',
   percent: '',
 }
+
+/** Predlozi za radno mesto — može i svoj tekst. */
+const POSITIONS = ['Konobar', 'Šanker', 'Kuvar', 'Pomoćni radnik', 'Menadžer', 'Praktikant']
+
+/** Emodži koje admin bira za bedž — bez tastature sa emodžijima. */
+const BADGE_ICONS = ['🏅', '🏆', '⭐', '🌟', '💎', '🎯', '⏰', '🔥', '💪', '🤝', '☕', '🧊', '👑', '🚀']
+
+const emptyBadge = { name: '', icon: '🏅', description: '' }
 
 /**
  * Način plaćanja — dnevnica ili plata, uz procenat od pazara.
@@ -118,6 +128,41 @@ function PayFields({ form, setForm }) {
   )
 }
 
+/**
+ * Radno mesto — konobar, šanker… Klikom se bira iz predloga, a može i svoje.
+ * Vidi se na spisku radnika i na ekranu „Tim“, koji gledaju i radnici.
+ */
+function PositionField({ form, setForm }) {
+  const set = (position) => setForm((f) => ({ ...f, position }))
+
+  return (
+    <Field label="Radno mesto" hint="Vidi se svima na ekranu Tim.">
+      <Input
+        value={form.position}
+        onChange={(e) => set(e.target.value)}
+        placeholder="npr. Konobar"
+      />
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {POSITIONS.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => set(form.position === p ? '' : p)}
+            className={cx(
+              'rounded-full px-2.5 py-1 text-[11px] font-semibold transition',
+              form.position === p
+                ? 'bg-ink text-white'
+                : 'bg-stone-100 text-stone-600 hover:bg-stone-200',
+            )}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+    </Field>
+  )
+}
+
 /** Lozinka koju je lako pročitati i otkucati na telefonu. */
 function generatePassword() {
   const chars = 'abcdefghijkmnpqrstuvwxyz23456789'
@@ -148,17 +193,26 @@ export default function AdminWorkers() {
   // { reportId, value } — smena kojoj se upravo menja iznos dnevnice
   const [wageRow, setWageRow] = useState(null)
 
+  /* Bedževi: spisak koji admin pravi i ko koji ima. */
+  const [badges, setBadges] = useState([])
+  const [owned, setOwned] = useState(new Map())
+  const [badgesOpen, setBadgesOpen] = useState(false)
+  const [picked, setPicked] = useState(new Set()) // u prozoru za dodelu
+  const [badgeForm, setBadgeForm] = useState(null) // { id?, name, icon, description }
+  const [badgeToRemove, setBadgeToRemove] = useState(null)
+
   const range = useMemo(
     () => ({ from: period.from, to: period.to, periodKey: period.key }),
     [period],
   )
 
   const load = useCallback(async () => {
+    // Redosled zadaje admin strelicama; ime je samo rezerva kad su isti.
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('is_deleted', false)
-      .order('role')
+      .order('sort_order')
       .order('full_name')
 
     if (error) {
@@ -174,6 +228,17 @@ export default function AdminWorkers() {
       console.error(err)
       toast.error(errorMessage(err, 'Ne mogu da učitam obračun dnevnica.'))
     }
+
+    // Bedževi su dodatak — ako skripta za bazu još nije puštena, ekran radi
+    // i bez njih, samo se sekcija ne prikazuje.
+    try {
+      const [lista, dodele] = await Promise.all([loadBadges(), loadWorkerBadges()])
+      setBadges(lista)
+      setOwned(dodele)
+    } catch (err) {
+      console.error(err)
+    }
+
     setLoading(false)
   }, [range, toast])
 
@@ -192,6 +257,57 @@ export default function AdminWorkers() {
   /* Neaktivni ne stoje među aktivnima — sklonjeni su na dno, iza dugmeta. */
   const activeRows = useMemo(() => rows.filter((r) => r.person.is_active), [rows])
   const inactiveRows = useMemo(() => rows.filter((r) => !r.person.is_active), [rows])
+
+  const badgeById = useMemo(() => new Map(badges.map((b) => [b.id, b])), [badges])
+
+  /** Bedževi jednog radnika, redom kojim stoje u spisku. */
+  const badgesOf = useCallback(
+    (personId) =>
+      (owned.get(personId) ?? []).map((r) => badgeById.get(r.badge_id)).filter(Boolean),
+    [owned, badgeById],
+  )
+
+  /**
+   * Zamena mesta sa susedom iznad (-1) ili ispod (+1).
+   * Menja se samo redosled aktivnih — neaktivni stoje na dnu, iza dugmeta.
+   */
+  async function moveWorker(index, dir) {
+    const target = index + dir
+    if (target < 0 || target >= activeRows.length) return
+
+    // Radnik se izvadi i ubaci na novo mesto, pa se CEO spisak prebroji na
+    // 10, 20, 30… Zamena samo dva broja ne bi radila ako su zatečeni radnici
+    // svi sa istim redosledom — tada bi zamena bila 1000 za 1000.
+    const poredak = activeRows.map((r) => r.person)
+    const [moved] = poredak.splice(index, 1)
+    poredak.splice(target, 0, moved)
+
+    const novi = new Map(poredak.map((p, i) => [p.id, (i + 1) * 10]))
+
+    // Odmah na ekranu, pa u bazu — da spisak ne „poskoči“ posle odgovora.
+    setPeople((prev) =>
+      prev
+        .map((p) => (novi.has(p.id) ? { ...p, sort_order: novi.get(p.id) } : p))
+        .sort(
+          (x, y) =>
+            x.sort_order - y.sort_order ||
+            String(x.full_name).localeCompare(String(y.full_name)),
+        ),
+    )
+
+    const izmene = poredak.filter((p) => p.sort_order !== novi.get(p.id))
+    const res = await Promise.all(
+      izmene.map((p) =>
+        supabase.from('profiles').update({ sort_order: novi.get(p.id) }).eq('id', p.id),
+      ),
+    )
+
+    const greska = res.find((r) => r.error)
+    if (greska) {
+      toast.error(errorMessage(greska.error, 'Redosled nije sačuvan.'))
+      load()
+    }
+  }
 
   /** Koliko radnik još ima da primi u izabranom periodu. */
   function owedOf(person) {
@@ -383,6 +499,7 @@ export default function AdminWorkers() {
       phone: person.phone ?? '',
       password: '',
       role: person.role,
+      position: person.position ?? '',
       pay_model: person.pay_model === 'plata' ? 'plata' : 'dnevnica',
       daily_wage: String(person.daily_wage ?? ''),
       monthly_salary: String(person.monthly_salary ?? ''),
@@ -414,6 +531,13 @@ export default function AdminWorkers() {
 
     if (error) return toast.error(error)
 
+    // Radno mesto se upisuje posle — funkcija na serveru je ne zna, a admin
+    // sme da menja profil direktno.
+    const position = form.position.trim()
+    if (position && data?.user?.id) {
+      await supabase.from('profiles').update({ position }).eq('id', data.user.id)
+    }
+
     setCreated({ username: name, password: form.password })
     toast.success('Nalog je otvoren.')
     load()
@@ -429,6 +553,7 @@ export default function AdminWorkers() {
     const payload = {
       full_name: name,
       phone: form.phone.trim() || null,
+      position: form.position.trim(),
       pay_model: form.pay_model === 'plata' ? 'plata' : 'dnevnica',
       daily_wage: parseNumber(form.daily_wage),
       monthly_salary: parseNumber(form.monthly_salary),
@@ -540,6 +665,70 @@ export default function AdminWorkers() {
     await load()
   }
 
+  /* ---------------------------------------------------------------- */
+  /*  Bedževi                                                          */
+  /* ---------------------------------------------------------------- */
+  /** Prozor za dodelu — unapred označi one koje radnik već ima. */
+  function openBadges(person) {
+    setPicked(new Set((owned.get(person.id) ?? []).map((r) => r.badge_id)))
+    setModal({ kind: 'bedzevi', person })
+  }
+
+  async function saveBadges() {
+    const person = modal.person
+    setWorking(true)
+    try {
+      await saveWorkerBadges(person.id, [...picked], owned.get(person.id) ?? [], profile.id)
+      toast.success('Bedževi su sačuvani.')
+      setModal(null)
+      await load()
+    } catch (err) {
+      toast.error(errorMessage(err, 'Bedževi nisu sačuvani.'))
+    }
+    setWorking(false)
+  }
+
+  /** Nov bedž ili izmena postojećeg — zavisi od toga ima li `id`. */
+  async function saveBadgeDef(e) {
+    e.preventDefault()
+    const name = badgeForm.name.trim()
+    if (!name) return toast.error('Unesi naziv bedža.')
+
+    setWorking(true)
+    const payload = {
+      name,
+      icon: badgeForm.icon || '🏅',
+      description: badgeForm.description.trim(),
+    }
+    const { error } = badgeForm.id
+      ? await supabase.from('badges').update(payload).eq('id', badgeForm.id)
+      : await supabase
+          .from('badges')
+          .insert({ ...payload, sort_order: (badges.length + 1) * 10 })
+    setWorking(false)
+
+    if (error) {
+      toast.error(
+        error.code === '23505' ? 'Bedž sa tim nazivom već postoji.' : errorMessage(error),
+      )
+      return
+    }
+    setBadgeForm(null)
+    toast.success(badgeForm.id ? 'Bedž je izmenjen.' : 'Bedž je dodat.')
+    load()
+  }
+
+  async function deleteBadgeDef(badge) {
+    setWorking(true)
+    const { error } = await supabase.from('badges').delete().eq('id', badge.id)
+    setWorking(false)
+    setBadgeToRemove(null)
+
+    if (error) return toast.error(errorMessage(error))
+    toast.success('Bedž je obrisan.')
+    load()
+  }
+
   async function savePayout(e) {
     e.preventDefault()
     const person = modal.person
@@ -625,16 +814,46 @@ export default function AdminWorkers() {
 
   if (loading) return <FullPageLoader />
 
-  /** Jedan radnik na spisku — isti red i za aktivne i za neaktivne. */
-  const workerRow = ({ person, calc }) => (
-    <div key={person.id} className={cx('p-4', !person.is_active && 'opacity-60')}>
+  /**
+   * Jedan radnik na spisku — isti red i za aktivne i za neaktivne.
+   * `index` dolazi iz `map` i služi strelicama za redosled (samo kod aktivnih).
+   */
+  const workerRow = ({ person, calc }, index = 0) => (
+    <div
+      key={person.id}
+      className={cx('px-4 py-3 lg:py-2.5', !person.is_active && 'opacity-60')}
+    >
       <div className="flex items-start gap-3">
+        {/* Redosled zadaje admin — najvažniji radnici na vrh. */}
+        {person.is_active && activeRows.length > 1 && (
+          <div className="flex shrink-0 flex-col gap-0.5 pt-0.5">
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => moveWorker(index, -1)}
+              aria-label={`Pomeri ${person.full_name} gore`}
+              className="rounded-md px-1.5 text-[11px] leading-5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700 disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              ▲
+            </button>
+            <button
+              type="button"
+              disabled={index === activeRows.length - 1}
+              onClick={() => moveWorker(index, 1)}
+              aria-label={`Pomeri ${person.full_name} dole`}
+              className="rounded-md px-1.5 text-[11px] leading-5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700 disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              ▼
+            </button>
+          </div>
+        )}
+
         <Avatar
           name={person.full_name}
           path={person.avatar_path}
           zoomable
           className={cx(
-            'h-11 w-11 text-sm',
+            'h-10 w-10 text-sm',
             person.role === 'admin' ? 'bg-ink text-white' : 'bg-stone-200 text-stone-700',
           )}
         />
@@ -659,18 +878,37 @@ export default function AdminWorkers() {
             )}
           </div>
           <p className="mt-0.5 text-xs text-stone-500">
+            {person.position?.trim() ? `${person.position.trim()} · ` : ''}
             {calc.model === 'plata'
               ? `plata ${formatMoney(calc.salary)} mesečno`
               : `dnevnica ${formatMoney(calc.wage)}`}
             {calc.percent > 0 ? ` · ${formatQty(calc.percent)}% od pazara` : ''}
             {person.phone ? ` · ${person.phone}` : ''}
           </p>
+
+          {/* Priznanja — vide se i radniku na ekranu Tim. */}
+          {badgesOf(person.id).length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {badgesOf(person.id).map((b) => (
+                <span
+                  key={b.id}
+                  title={b.description || b.name}
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-600/20"
+                >
+                  <span aria-hidden="true">{b.icon}</span>
+                  {b.name}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Obračun — sitan naslov iznad broja, pa se čita bez traženja. */}
-      <div className="mt-3 rounded-2xl border border-stone-200/70 bg-white p-3">
-        <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+      {/* Obračun i dugmad. Na telefonu jedno ispod drugog, a na širem ekranu
+          u istom redu — tako spisak od 13 radnika stane bez skrolovanja. */}
+      <div className="mt-2 flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
+      <div className="rounded-2xl border border-stone-200/70 bg-white px-3 py-2.5 lg:flex-1">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           {[
             // Dana, a ne smena — ko radi međusmenu ima dve smene, a jednu dnevnicu.
             [plural(calc.days, 'dan'), String(calc.days), ''],
@@ -693,6 +931,7 @@ export default function AdminWorkers() {
               </span>
             ))}
 
+          {/* Minus se ne piše — pretplata se kaže rečju, da se ne čita kao greška. */}
           <span
             className={cx(
               'ml-auto rounded-full px-3 py-1.5 text-sm font-bold tabular-nums',
@@ -703,21 +942,15 @@ export default function AdminWorkers() {
                   : 'bg-stone-100 text-stone-500',
             )}
           >
-            {formatMoney(calc.balance, false)}
-            <span className="ml-1 text-[11px] font-semibold opacity-80">za isplatu</span>
+            {formatMoney(Math.abs(calc.balance), false)}
+            <span className="ml-1 text-[11px] font-semibold opacity-80">
+              {calc.balance < 0 ? 'pretplaćeno' : 'za isplatu'}
+            </span>
           </span>
         </div>
       </div>
 
-      {calc.returned > 0 && (
-        <p className="mt-1.5 text-xs text-amber-700">
-          {calc.returned}{' '}
-          {plural(calc.returned, ['smena je vraćena', 'smene su vraćene', 'smena je vraćeno'])} na
-          ispravku i ne ulazi u obračun.
-        </p>
-      )}
-
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 lg:shrink-0">
         <Button
           variant="secondary"
           size="sm"
@@ -757,6 +990,12 @@ export default function AdminWorkers() {
         >
           Bonus
         </Button>
+        {/* Dodela priznanja — spisak bedževa je ispod, u svojoj sekciji. */}
+        {badges.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={() => openBadges(person)}>
+            Bedževi
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={() => openEdit(person)}>
           Izmeni
         </Button>
@@ -772,6 +1011,15 @@ export default function AdminWorkers() {
           </Button>
         )}
       </div>
+      </div>
+
+      {calc.returned > 0 && (
+        <p className="mt-1.5 text-xs text-amber-700">
+          {calc.returned}{' '}
+          {plural(calc.returned, ['smena je vraćena', 'smene su vraćene', 'smena je vraćeno'])} na
+          ispravku i ne ulazi u obračun.
+        </p>
+      )}
     </div>
   )
 
@@ -797,7 +1045,13 @@ export default function AdminWorkers() {
           <Stat label="Zarađeno" value={formatMoney(totals.earned, false)} />
           <Stat label="Bonusi" value={formatMoney(totals.bonus, false)} />
           <Stat label="Isplaćeno" value={formatMoney(totals.paid, false)} />
-          <Stat label="Za isplatu" value={formatMoney(totals.balance, false)} tone="total" />
+          {/* Ako je isplaćeno više nego što je zarađeno, ne piše se minus nego
+              „Pretplaćeno“ — minus ispod naslova „za isplatu“ se čita kao greška. */}
+          <Stat
+            label={totals.balance < 0 ? 'Pretplaćeno' : 'Za isplatu'}
+            value={formatMoney(Math.abs(totals.balance), false)}
+            tone={totals.balance < 0 ? 'expense' : 'total'}
+          />
         </div>
       </Card>
 
@@ -859,6 +1113,123 @@ export default function AdminWorkers() {
             )}
           </>
         )}
+      </Card>
+
+      {/* ---------- Bedževi ---------- */}
+      <Card>
+        <CardHeader
+          title="Bedževi"
+          subtitle={`${badges.length} · dodeljuješ ih kod radnika`}
+          action={
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setBadgesOpen((v) => !v)}
+                aria-expanded={badgesOpen}
+              >
+                {badgesOpen ? 'Sakrij' : 'Prikaži'}
+              </Button>
+              {badgesOpen && (
+                <Button
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setBadgeForm({ ...emptyBadge })}
+                >
+                  + Nov
+                </Button>
+              )}
+            </div>
+          }
+        />
+
+        {badgesOpen &&
+          (badges.length === 0 ? (
+            <p className="px-4 pb-4 text-sm text-stone-500">
+              Još nema bedževa. Napravi prvi — npr. „Radnik meseca“.
+            </p>
+          ) : (
+            <ul className="divide-y divide-stone-100">
+              {badges.map((badge) => {
+                const koliko = [...owned.values()].filter((list) =>
+                  list.some((r) => r.badge_id === badge.id),
+                ).length
+
+                return (
+                  <li key={badge.id} className="px-4 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl leading-none" aria-hidden="true">
+                        {badge.icon}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-bold text-stone-900">
+                          {badge.name}
+                        </span>
+                        <span className="block text-[11px] text-stone-400">
+                          {badge.description || '—'}
+                        </span>
+                      </span>
+                      <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-stone-500">
+                        {koliko}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() =>
+                          setBadgeForm({
+                            id: badge.id,
+                            name: badge.name,
+                            icon: badge.icon,
+                            description: badge.description ?? '',
+                          })
+                        }
+                      >
+                        Izmeni
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setBadgeToRemove((id) => (id === badge.id ? null : badge.id))
+                        }
+                        aria-label={`Obriši bedž ${badge.name}`}
+                        className="shrink-0 rounded-md px-1.5 text-base leading-none text-stone-400 transition hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    {badgeToRemove === badge.id && (
+                      <div className="mt-2 rounded-lg bg-rose-50 p-2.5 ring-1 ring-inset ring-rose-200">
+                        <p className="text-xs font-bold text-rose-900">Da li si siguran?</p>
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-rose-800">
+                          Bedž <strong>{badge.name}</strong> se briše svima koji ga imaju
+                          {koliko > 0 ? ` (${koliko})` : ''}.
+                        </p>
+                        <div className="mt-2 flex justify-end gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setBadgeToRemove(null)}
+                          >
+                            Ne, vrati me
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            loading={working}
+                            onClick={() => deleteBadgeDef(badge)}
+                          >
+                            Da, obriši
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          ))}
       </Card>
 
       {/* Šta ulazi u preuzet obračun */}
@@ -943,6 +1314,8 @@ export default function AdminWorkers() {
                 placeholder="064 123 4567"
               />
             </Field>
+
+            <PositionField form={form} setForm={setForm} />
 
             <PayFields form={form} setForm={setForm} />
 
@@ -1031,6 +1404,8 @@ export default function AdminWorkers() {
                   onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
                 />
               </Field>
+
+              <PositionField form={form} setForm={setForm} />
 
               <PayFields form={form} setForm={setForm} />
 
@@ -1313,6 +1688,153 @@ export default function AdminWorkers() {
       </Modal>
 
       {/* ================================================================ */}
+      {/*  Modal: dodela bedževa                                           */}
+      {/* ================================================================ */}
+      <Modal
+        open={modal?.kind === 'bedzevi'}
+        onClose={() => !working && setModal(null)}
+        title={`Bedževi — ${modal?.person?.full_name ?? ''}`}
+        footer={
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              disabled={working}
+              onClick={() => setModal(null)}
+            >
+              Otkaži
+            </Button>
+            <Button className="flex-1" loading={working} onClick={saveBadges}>
+              Sačuvaj
+            </Button>
+          </div>
+        }
+      >
+        {modal?.kind === 'bedzevi' && (
+          <ul className="divide-y divide-stone-100">
+            {badges.map((badge) => {
+              const on = picked.has(badge.id)
+              return (
+                <li key={badge.id}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPicked((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(badge.id)) next.delete(badge.id)
+                        else next.add(badge.id)
+                        return next
+                      })
+                    }
+                    aria-pressed={on}
+                    className="flex w-full items-center gap-3 px-1 py-2.5 text-left transition hover:bg-stone-50"
+                  >
+                    <span
+                      className={cx(
+                        'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold transition',
+                        on
+                          ? 'bg-brand-600 text-white'
+                          : 'bg-white text-transparent ring-1 ring-inset ring-stone-300',
+                      )}
+                      aria-hidden="true"
+                    >
+                      ✓
+                    </span>
+                    <span className="text-xl leading-none" aria-hidden="true">
+                      {badge.icon}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={cx(
+                          'block text-sm',
+                          on ? 'font-bold text-stone-900' : 'font-semibold text-stone-600',
+                        )}
+                      >
+                        {badge.name}
+                      </span>
+                      {badge.description && (
+                        <span className="block text-[11px] text-stone-400">
+                          {badge.description}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </Modal>
+
+      {/* ================================================================ */}
+      {/*  Modal: nov / izmena bedža                                       */}
+      {/* ================================================================ */}
+      <Modal
+        open={badgeForm !== null}
+        onClose={() => !working && setBadgeForm(null)}
+        title={badgeForm?.id ? 'Izmeni bedž' : 'Nov bedž'}
+        size="sm"
+      >
+        {badgeForm !== null && (
+          <form onSubmit={saveBadgeDef} className="space-y-4">
+            <Field label="Naziv" required>
+              <Input
+                value={badgeForm.name}
+                onChange={(e) => setBadgeForm((b) => ({ ...b, name: e.target.value }))}
+                placeholder="npr. Radnik meseca"
+                autoFocus
+                required
+              />
+            </Field>
+
+            <Field label="Znak">
+              <div className="flex flex-wrap gap-1.5">
+                {BADGE_ICONS.map((ic) => (
+                  <button
+                    key={ic}
+                    type="button"
+                    onClick={() => setBadgeForm((b) => ({ ...b, icon: ic }))}
+                    aria-pressed={badgeForm.icon === ic}
+                    className={cx(
+                      'h-10 w-10 rounded-xl text-lg transition',
+                      badgeForm.icon === ic
+                        ? 'bg-brand-50 ring-2 ring-inset ring-brand-500'
+                        : 'bg-stone-100 hover:bg-stone-200',
+                    )}
+                  >
+                    {ic}
+                  </button>
+                ))}
+              </div>
+            </Field>
+
+            <Field label="Opis" hint="Opciono — vidi se ispod naziva.">
+              <Input
+                value={badgeForm.description}
+                onChange={(e) => setBadgeForm((b) => ({ ...b, description: e.target.value }))}
+                placeholder="npr. Najbolji u mesecu"
+              />
+            </Field>
+
+            <div className="flex gap-2 pt-1">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                disabled={working}
+                onClick={() => setBadgeForm(null)}
+              >
+                Otkaži
+              </Button>
+              <Button type="submit" className="flex-1" loading={working}>
+                Sačuvaj
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ================================================================ */}
       {/*  Modal: isplata                                                  */}
       {/* ================================================================ */}
       <Modal
@@ -1360,9 +1882,16 @@ export default function AdminWorkers() {
                 </span>
               </div>
               <div className="mt-1 flex justify-between border-t border-stone-200 pt-1.5">
-                <span className="font-semibold text-stone-700">Za isplatu</span>
-                <span className="font-extrabold tabular-nums text-brand-700">
-                  {formatMoney(modal.calc.balance)}
+                <span className="font-semibold text-stone-700">
+                  {modal.calc.balance < 0 ? 'Pretplaćeno' : 'Za isplatu'}
+                </span>
+                <span
+                  className={cx(
+                    'font-extrabold tabular-nums',
+                    modal.calc.balance < 0 ? 'text-rose-600' : 'text-brand-700',
+                  )}
+                >
+                  {formatMoney(Math.abs(modal.calc.balance), false)}
                 </span>
               </div>
             </div>
