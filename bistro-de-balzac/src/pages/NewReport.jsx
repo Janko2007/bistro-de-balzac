@@ -5,9 +5,17 @@ import { useAuth } from '../context/AuthContext'
 import { useToast, useToastOffset } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { buildStoragePath, compressImage } from '../lib/image'
-import { categoryComparator, hiddenCategoryNames, loadCategories } from '../lib/categories'
+import {
+  carriedCategoryNames,
+  categoryComparator,
+  hiddenCategoryNames,
+  isCountDue,
+  loadCategories,
+  nextCountOn,
+} from '../lib/categories'
 import { dailyTaskFor } from '../lib/rules'
 import Avatar from '../components/Avatar'
+import MidShiftView from '../components/MidShiftView'
 import RuleText from '../components/RuleText'
 import {
   Badge,
@@ -176,6 +184,9 @@ export default function NewReport() {
   const [categories, setCategories] = useState([])
   const [people, setPeople] = useState([])
   const [ruleDocs, setRuleDocs] = useState([]) // odatle se čita dnevna obaveza za dan smene
+  // Krajnje stanje iz prošle smene — odatle se prepisuje početno kod grupa
+  // koje se popisuju ređe (žestine na 7 dana).
+  const [lastEnds, setLastEnds] = useState(() => new Map())
 
   /* Izbor smene — zaključava se čim se uđe u nju. */
   const [reportDate, setReportDate] = useState(todayISO())
@@ -212,6 +223,9 @@ export default function NewReport() {
   /* Reference — potrebne unutar odloženih upisa i poruka sa servera, gde
      stanje iz React-a može da bude zastarelo. */
   const reportIdRef = useRef(null)
+  // Za koji je izveštaj već učitano ono što je upisano — dok to ne stoji,
+  // početno stanje se ne prepisuje, da se zatečeni unos ne pregazi.
+  const rowsLoadedFor = useRef(null)
   const itemsRef = useRef([])
   const rowsRef = useRef({})
   const dirtyItems = useRef(new Set()) // stavke sa još neupisanim izmenama
@@ -242,7 +256,7 @@ export default function NewReport() {
     let active = true
 
     async function load() {
-      const [itemsRes, cats, peopleRes, rulesRes] = await Promise.all([
+      const [itemsRes, cats, peopleRes, rulesRes, endsRes] = await Promise.all([
         supabase
           .from('items')
           .select('id, name, category, unit, sort_order, is_counter, count_mode')
@@ -251,6 +265,8 @@ export default function NewReport() {
         loadCategories().catch(() => []),
         supabase.from('profiles').select('id, full_name, avatar_path'),
         supabase.from('rule_docs').select('title, body'),
+        // Pogled ne postoji u bazama bez skripte za retko popisivanje.
+        supabase.from('last_item_end').select('item_id, qty_end'),
       ])
 
       if (!active) return
@@ -261,6 +277,9 @@ export default function NewReport() {
       setCategories(cats)
       setPeople(peopleRes.data ?? [])
       setRuleDocs(rulesRes.data ?? [])
+      setLastEnds(
+        new Map((endsRes.data ?? []).map((r) => [r.item_id, Number(r.qty_end)])),
+      )
       setLoading(false)
     }
 
@@ -414,6 +433,7 @@ export default function NewReport() {
         )
       }
       setRows(next)
+      rowsLoadedFor.current = id
 
       await Promise.all([loadStaff(id), loadImages(id)])
     },
@@ -671,6 +691,13 @@ export default function NewReport() {
   const joinsExisting = peek?.exists === true && peek.status === 'otvoren'
   const shiftTaken = peek?.exists === true && peek.status !== 'otvoren'
 
+  /* Međusmenu radi jedan čovek — ako je neko drugi već unutra, ulaz je
+     zatvoren i piše ko je to, da radnik ne gubi vreme. */
+  const midTaken =
+    shift === 'medjusmena' &&
+    joinsExisting &&
+    (peek.names ?? []).some((n) => n !== profile?.full_name)
+
   /** Koje smene tog dana radnik već ima otvorene. */
   const myShiftsToday = useMemo(
     () => new Set(myOpen.filter((r) => r.date === reportDate).map((r) => r.shift)),
@@ -774,6 +801,84 @@ export default function NewReport() {
     const compare = categoryComparator(categories)
     return Array.from(map.entries()).sort((a, b) => compare(a[0], b[0]))
   }, [items, search, categories])
+
+  /* ------------------------------------------------------------ */
+  /*  Grupe koje se popisuju ređe (žestine na 7 dana)              */
+  /*                                                               */
+  /*  Dok ne dođe red za popis, radniku se početno stanje PREPISUJE */
+  /*  iz prošle smene — on upisuje samo prodato, a krajnje ide      */
+  /*  sledećoj smeni kao početno.                                   */
+  /* ------------------------------------------------------------ */
+  const carriedCats = useMemo(
+    () => carriedCategoryNames(categories, reportDate),
+    [categories, reportDate],
+  )
+
+  /** Grupe koje se baš danas popisuju — po zatvaranju smene se upisuje datum. */
+  const dueCatNames = useMemo(
+    () =>
+      categories
+        .filter((c) => c.is_active && Number(c.count_every_days) > 0 && isCountDue(c, reportDate))
+        .map((c) => c.name),
+    [categories, reportDate],
+  )
+
+  const prefilledFor = useRef(null)
+
+  useEffect(() => {
+    if (!reportId || !editable) return
+    if (carriedCats.size === 0 || items.length === 0) return
+    // Tek kad se učita ono što je već upisano — da se ne pregazi.
+    if (rowsLoadedFor.current !== reportId) return
+    if (prefilledFor.current === reportId) return
+
+    const todo = items.filter(
+      (i) => carriedCats.has(i.category) && lastEnds.has(i.id) && (rows[i.id]?.s ?? '') === '',
+    )
+    if (todo.length === 0) {
+      prefilledFor.current = reportId
+      return
+    }
+    prefilledFor.current = reportId
+
+    const fresh = {}
+    const payload = todo.map((item) => {
+      const mode = modeOf(item)
+      const start = lastEnds.get(item.id)
+      // Kod „krajnje“ (voće) se i krajnje prepisuje, da prodato ispadne nula.
+      const row = {
+        s: String(start),
+        d: '',
+        p: '',
+        e: mode === 'krajnje' ? String(start) : '',
+      }
+      fresh[item.id] = row
+      return {
+        report_id: reportId,
+        item_id: item.id,
+        item_name: item.name,
+        unit: item.unit,
+        category: item.category,
+        qty_start: start,
+        qty_added: null,
+        qty_sold: soldOf(row, mode),
+        qty_end: endOf(row, mode),
+        is_counter: mode === 'brojac',
+        count_mode: mode,
+      }
+    })
+
+    setRows((prev) => ({ ...fresh, ...prev }))
+    supabase
+      .from('shift_report_items')
+      .upsert(payload, { onConflict: 'report_id,item_id' })
+      .then(({ error }) => {
+        if (error) {
+          console.error(error)
+          prefilledFor.current = null
+        }
+      })
+  }, [reportId, editable, carriedCats, items, lastEnds, rows])
 
   const doneCount = useMemo(() => items.filter((i) => isDone(rows[i.id])).length, [items, rows])
 
@@ -907,6 +1012,17 @@ export default function NewReport() {
         .update({ status: 'poslat' })
         .eq('id', reportId)
       if (error) throw error
+
+      /* Grupe koje su se danas stvarno popisivale (žestine) dobijaju novi
+         datum popisa — od njega se broji sledećih 7 dana. Ako upis ne prođe,
+         smena je ipak zatvorena, pa se greška samo beleži. */
+      if (dueCatNames.length > 0) {
+        const { error: markError } = await supabase.rpc('mark_categories_counted', {
+          p_names: dueCatNames,
+          p_date: reportDate,
+        })
+        if (markError) console.error(markError)
+      }
 
       setConfirmOpen(false)
       toast.success('Smena je zatvorena i poslata adminu.')
@@ -1053,18 +1169,20 @@ export default function NewReport() {
               size="lg"
               className="w-full"
               loading={joining}
-              disabled={peek === null || shiftTaken}
+              disabled={peek === null || shiftTaken || midTaken}
               onClick={joinShift}
             >
               {peek === null ? 'Proveravam…' : joinsExisting ? 'Uđi u smenu' : 'Otvori smenu'}
             </Button>
 
-            <p className={cx('hint', shiftTaken && 'text-rose-600')}>
+            <p className={cx('hint', (shiftTaken || midTaken) && 'text-rose-600')}>
               {shiftTaken
                 ? 'Smena je zatvorena — izaberi drugu.'
-                : myShiftsToday.size > 0
-                  ? 'Već radiš ovaj dan — dnevnica ostaje jedna.'
-                  : 'Ulaskom u smenu ti se računa dnevnica.'}
+                : midTaken
+                  ? 'Međusmenu radi jedan radnik — idi u prvu ili drugu smenu.'
+                  : myShiftsToday.size > 0
+                    ? 'Već radiš ovaj dan — dnevnica ostaje jedna.'
+                    : 'Ulaskom u smenu ti se računa dnevnica.'}
             </p>
           </div>
         )}
@@ -1243,6 +1361,11 @@ export default function NewReport() {
           {grouped.map(([category, categoryItems]) => {
             const open = isCatOpen(category)
             const done = categoryItems.filter((i) => isDone(rows[i.id])).length
+            /* Grupa koja se popisuje ređe: danas se ili broji (pa to jasno
+               piše), ili se početno samo prepisuje iz prošle smene. */
+            const cat = categories.find((c) => c.name === category)
+            const every = Number(cat?.count_every_days ?? 0)
+            const carried = carriedCats.has(category)
 
             return (
               <div key={category}>
@@ -1263,6 +1386,30 @@ export default function NewReport() {
                     </span>
                   }
                 />
+
+                {/* Grupa sa ređim popisom — jednom rečenicom šta se danas radi. */}
+                {open && every > 0 && (
+                  <div
+                    className={cx(
+                      'border-b px-4 py-2 text-xs font-medium',
+                      carried
+                        ? 'border-stone-100 bg-stone-50 text-stone-500'
+                        : 'border-amber-200 bg-amber-50 text-amber-900',
+                    )}
+                  >
+                    {carried ? (
+                      <>
+                        Početno je prepisano iz prošle smene — upiši samo prodato.
+                        {nextCountOn(cat) && ` Popis ${formatDate(nextCountOn(cat))}.`}
+                      </>
+                    ) : (
+                      <>
+                        <b>Danas se popisuje</b> — izmeri i upiši početno stanje.
+                        {cat?.count_due && ' Admin je tražio popis.'}
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {/* Legenda kolona — vidi se samo kad je kategorija otvorena.
                     Polja su široka 78px da i petocifren broj stane ceo. */}
@@ -1317,6 +1464,21 @@ export default function NewReport() {
                                Kod „krajnje“ se prodato ne kuca nego računa. */
                             const prazno = counter && c.key === 'd'
                             const racunato = endInput && c.key === 'p'
+                            /* Grupa koja se danas ne popisuje: početno je
+                               prepisano iz prošle smene i ne kuca se. */
+                            const prepisano = carried && c.key === 's'
+
+                            if (prepisano) {
+                              return (
+                                <span
+                                  key={c.key}
+                                  title="Prepisano iz prošle smene — popisuje se na određen broj dana"
+                                  className="w-[78px] rounded-lg bg-stone-100 px-1.5 py-2.5 text-center text-base font-bold tabular-nums text-stone-500"
+                                >
+                                  {row.s === '' ? '—' : formatQty(parseNumber(row.s))}
+                                </span>
+                              )
+                            }
 
                             if (prazno || racunato) {
                               return (
@@ -1423,6 +1585,9 @@ export default function NewReport() {
           )}
         </div>
       </Card>
+
+      {/* ---------- Međusmena: šta rade prva i druga smena ---------- */}
+      {shift === 'medjusmena' && reportId && <MidShiftView date={reportDate} />}
 
       {/* ---------- Slika izveštaja (kasa + aparat za kartice) ---------- */}
       <Card className={cx(images.length === 0 && 'ring-1 ring-rose-300')}>

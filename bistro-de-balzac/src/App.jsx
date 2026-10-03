@@ -61,8 +61,9 @@ export default function App() {
         <Route path="novi-popis" element={<NewReport />} />
         <Route path="moji-izvestaji" element={<MyReports />} />
         <Route path="profil" element={<Profile />} />
-        {/* Stara adresa — ako je neko sačuvao link ili ikonicu na telefonu. */}
+        {/* Stare adrese — ako je neko sačuvao link ili ikonicu na telefonu. */}
         <Route path="moje-dnevnice" element={<Navigate to="/profil" replace />} />
+        <Route path="tim" element={<Navigate to="/profil" replace />} />
         <Route path="izvestaj/:id" element={<ReportDetail />} />
 
         <Route
