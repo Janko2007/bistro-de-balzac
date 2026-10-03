@@ -190,11 +190,11 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
               return (
                 <li
                   key={category.id}
-                  className={cx(
-                    'flex items-center gap-2 px-2.5 py-2',
-                    !category.is_active && 'opacity-60',
-                  )}
+                  className={cx('px-2.5 py-2.5', !category.is_active && 'opacity-60')}
                 >
+                  {/* Gore naziv i podaci na punoj širini, dole dugmad u svom redu —
+                      da naziv ne bude stisnut u uzanu kolonu. */}
+                  <div className="flex items-center gap-2">
                   <div className="flex shrink-0 flex-col">
                     <button
                       type="button"
@@ -217,21 +217,35 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-stone-800">
-                      {category.name}
-                    </p>
-                    <p className="text-xs text-stone-400">
+                    <p className="text-sm font-bold text-stone-900">{category.name}</p>
+                    <p className="mt-0.5 text-xs text-stone-400">
                       {countLabel(used, 'artikal')}
                       {!category.is_active && ' · sakrivena'}
-                      {Number(category.count_every_days) > 0 &&
-                        ` · popis na ${category.count_every_days} dana`}
-                      {category.count_due && ' · popis tražen'}
-                      {!category.count_due &&
-                        nextCountOn(category) &&
-                        ` · sledeći ${formatDate(nextCountOn(category))}`}
                     </p>
+                    {Number(category.count_every_days) > 0 && (
+                      <p className="mt-1">
+                        <span
+                          className={cx(
+                            'inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset',
+                            category.count_due
+                              ? 'bg-amber-50 text-amber-800 ring-amber-600/20'
+                              : 'bg-stone-100 text-stone-600 ring-stone-500/15',
+                          )}
+                        >
+                          {category.count_due
+                            ? 'popis tražen'
+                            : `popis na ${category.count_every_days} dana${
+                                nextCountOn(category)
+                                  ? ` · sledeći ${formatDate(nextCountOn(category))}`
+                                  : ''
+                              }`}
+                        </span>
+                      </p>
+                    )}
+                  </div>
                   </div>
 
+                  <div className="mt-2 flex flex-wrap items-center gap-1 pl-7">
                   {/* Koliko često se grupa stvarno meri (žestine — na 7 dana). */}
                   <Button
                     variant="ghost"
@@ -285,6 +299,7 @@ export default function CategoryManager({ open, onClose, categories, items, onCh
                   >
                     Obriši
                   </Button>
+                  </div>
                 </li>
               )
             })}
