@@ -15,6 +15,7 @@ import {
 } from '../lib/categories'
 import { dailyTaskFor } from '../lib/rules'
 import Avatar from '../components/Avatar'
+import MidShiftView from '../components/MidShiftView'
 import RuleText from '../components/RuleText'
 import {
   Badge,
@@ -690,6 +691,13 @@ export default function NewReport() {
   const joinsExisting = peek?.exists === true && peek.status === 'otvoren'
   const shiftTaken = peek?.exists === true && peek.status !== 'otvoren'
 
+  /* Međusmenu radi jedan čovek — ako je neko drugi već unutra, ulaz je
+     zatvoren i piše ko je to, da radnik ne gubi vreme. */
+  const midTaken =
+    shift === 'medjusmena' &&
+    joinsExisting &&
+    (peek.names ?? []).some((n) => n !== profile?.full_name)
+
   /** Koje smene tog dana radnik već ima otvorene. */
   const myShiftsToday = useMemo(
     () => new Set(myOpen.filter((r) => r.date === reportDate).map((r) => r.shift)),
@@ -1161,18 +1169,20 @@ export default function NewReport() {
               size="lg"
               className="w-full"
               loading={joining}
-              disabled={peek === null || shiftTaken}
+              disabled={peek === null || shiftTaken || midTaken}
               onClick={joinShift}
             >
               {peek === null ? 'Proveravam…' : joinsExisting ? 'Uđi u smenu' : 'Otvori smenu'}
             </Button>
 
-            <p className={cx('hint', shiftTaken && 'text-rose-600')}>
+            <p className={cx('hint', (shiftTaken || midTaken) && 'text-rose-600')}>
               {shiftTaken
                 ? 'Smena je zatvorena — izaberi drugu.'
-                : myShiftsToday.size > 0
-                  ? 'Već radiš ovaj dan — dnevnica ostaje jedna.'
-                  : 'Ulaskom u smenu ti se računa dnevnica.'}
+                : midTaken
+                  ? 'Međusmenu radi jedan radnik — idi u prvu ili drugu smenu.'
+                  : myShiftsToday.size > 0
+                    ? 'Već radiš ovaj dan — dnevnica ostaje jedna.'
+                    : 'Ulaskom u smenu ti se računa dnevnica.'}
             </p>
           </div>
         )}
@@ -1575,6 +1585,9 @@ export default function NewReport() {
           )}
         </div>
       </Card>
+
+      {/* ---------- Međusmena: šta rade prva i druga smena ---------- */}
+      {shift === 'medjusmena' && reportId && <MidShiftView date={reportDate} />}
 
       {/* ---------- Slika izveštaja (kasa + aparat za kartice) ---------- */}
       <Card className={cx(images.length === 0 && 'ring-1 ring-rose-300')}>

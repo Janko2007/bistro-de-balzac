@@ -5,6 +5,7 @@ import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { EMPTY_STATS, loadWorkStats, settle } from '../lib/earnings'
 import { loadBadges, loadWorkerBadges, saveWorkerBadges } from '../lib/badges'
+import { addPosition, joinPositions, loadPositions, parsePositions } from '../lib/positions'
 import { currentPeriod, periodLabel } from '../lib/payperiod'
 import Avatar, { AvatarEditor } from '../components/Avatar'
 import PeriodPicker from '../components/PeriodPicker'
@@ -50,10 +51,7 @@ const emptyNew = {
   percent: '',
 }
 
-/** Predlozi za radno mesto — može i svoj tekst. */
-const POSITIONS = ['Konobar', 'Šanker', 'Kuvar', 'Pomoćni radnik', 'Menadžer', 'Praktikant']
-
-/** Emodži koje admin bira za bedž — bez tastature sa emodžijima. */
+/** Brzi izbor znaka za bedž — može i bilo koji drugi, ručno. */
 const BADGE_ICONS = ['🏅', '🏆', '⭐', '🌟', '💎', '🎯', '⏰', '🔥', '💪', '🤝', '☕', '🧊', '👑', '🚀']
 
 const emptyBadge = { name: '', icon: '🏅', description: '' }
@@ -129,36 +127,105 @@ function PayFields({ form, setForm }) {
 }
 
 /**
- * Radno mesto — konobar, šanker… Klikom se bira iz predloga, a može i svoje.
- * Vidi se na spisku radnika i na ekranu „Tim“, koji gledaju i radnici.
+ * Radno mesto — konobar, šanker, menadžer…
+ *
+ * Bira se klikom i može ih biti više odjednom (npr. konobar i šanker).
+ * Spisak dopunjuješ dugmetom „+ Novo“. Vidi se na spisku radnika i na
+ * ekranu „Tim“, koji gledaju i radnici.
  */
-function PositionField({ form, setForm }) {
-  const set = (position) => setForm((f) => ({ ...f, position }))
+function PositionField({ form, setForm, positions, onAdded }) {
+  const toast = useToast()
+  const [adding, setAdding] = useState(false)
+  const [fresh, setFresh] = useState('')
+
+  const chosen = parsePositions(form.position)
+  const set = (list) => setForm((f) => ({ ...f, position: joinPositions(list) }))
+
+  function toggle(name) {
+    set(chosen.includes(name) ? chosen.filter((p) => p !== name) : [...chosen, name])
+  }
+
+  async function addNew() {
+    const value = fresh.trim()
+    if (!value) return toast.error('Unesi naziv radnog mesta.')
+
+    try {
+      await addPosition(value, positions.length)
+      if (!chosen.includes(value)) set([...chosen, value])
+      setFresh('')
+      setAdding(false)
+      onAdded()
+    } catch (err) {
+      toast.error(errorMessage(err, 'Radno mesto nije dodato.'))
+    }
+  }
+
+  /* Radna mesta upisana ranije, a kojih više nema u spisku — da ne nestanu. */
+  const extra = chosen.filter((p) => !positions.some((x) => x.name === p))
 
   return (
-    <Field label="Radno mesto" hint="Vidi se svima na ekranu Tim.">
-      <Input
-        value={form.position}
-        onChange={(e) => set(e.target.value)}
-        placeholder="npr. Konobar"
-      />
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {POSITIONS.map((p) => (
+    <Field label="Radno mesto" hint="Može ih biti i više. Vidi se svima na ekranu Tim.">
+      <div className="flex flex-wrap gap-1.5">
+        {[...positions.map((p) => p.name), ...extra].map((name) => {
+          const on = chosen.includes(name)
+          return (
+            <button
+              key={name}
+              type="button"
+              onClick={() => toggle(name)}
+              aria-pressed={on}
+              className={cx(
+                'rounded-full px-3 py-1.5 text-xs font-semibold transition',
+                on ? 'bg-ink text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200',
+              )}
+            >
+              {on && <span className="mr-1">✓</span>}
+              {name}
+            </button>
+          )
+        })}
+
+        {!adding && (
           <button
-            key={p}
             type="button"
-            onClick={() => set(form.position === p ? '' : p)}
-            className={cx(
-              'rounded-full px-2.5 py-1 text-[11px] font-semibold transition',
-              form.position === p
-                ? 'bg-ink text-white'
-                : 'bg-stone-100 text-stone-600 hover:bg-stone-200',
-            )}
+            onClick={() => setAdding(true)}
+            className="rounded-full border border-dashed border-stone-300 px-3 py-1.5 text-xs font-semibold text-stone-500 transition hover:border-stone-400 hover:text-stone-700"
           >
-            {p}
+            + Novo
           </button>
-        ))}
+        )}
       </div>
+
+      {adding && (
+        <div className="mt-2 flex gap-2">
+          <Input
+            value={fresh}
+            onChange={(e) => setFresh(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                addNew()
+              }
+            }}
+            placeholder="npr. Kuvar"
+            autoFocus
+          />
+          <Button type="button" className="shrink-0" onClick={addNew}>
+            Dodaj
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="shrink-0"
+            onClick={() => {
+              setFresh('')
+              setAdding(false)
+            }}
+          >
+            Otkaži
+          </Button>
+        </div>
+      )}
     </Field>
   )
 }
@@ -196,6 +263,7 @@ export default function AdminWorkers() {
   /* Bedževi: spisak koji admin pravi i ko koji ima. */
   const [badges, setBadges] = useState([])
   const [owned, setOwned] = useState(new Map())
+  const [positions, setPositions] = useState([])
   const [badgesOpen, setBadgesOpen] = useState(false)
   const [picked, setPicked] = useState(new Set()) // u prozoru za dodelu
   const [badgeForm, setBadgeForm] = useState(null) // { id?, name, icon, description }
@@ -238,6 +306,8 @@ export default function AdminWorkers() {
     } catch (err) {
       console.error(err)
     }
+
+    setPositions(await loadPositions())
 
     setLoading(false)
   }, [range, toast])
@@ -909,9 +979,36 @@ export default function AdminWorkers() {
       <div className="mt-2 flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
       <div className="rounded-2xl border border-stone-200/70 bg-white px-3 py-2.5 lg:flex-1">
         <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+          {/* Dana, a ne smena — ko radi međusmenu ima dve smene, a jednu
+              dnevnicu. Klikom se otvara spisak dana, gde se pojedinom danu
+              umanjuje iznos. */}
+          {calc.model === 'dnevnica' && calc.days > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setWageRow(null)
+                setModal({ kind: 'dani', person, calc })
+              }}
+              className="min-w-0 rounded-lg px-1 py-0.5 text-left transition hover:bg-stone-100"
+              title="Otvori dnevnice po danima"
+            >
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+                {plural(calc.days, 'dan')}
+              </span>
+              <b className="block text-sm tabular-nums text-stone-900 underline decoration-stone-300 underline-offset-2">
+                {calc.days}
+              </b>
+            </button>
+          ) : (
+            <span className="min-w-0">
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+                {plural(calc.days, 'dan')}
+              </span>
+              <b className="block text-sm tabular-nums text-stone-900">{calc.days}</b>
+            </span>
+          )}
+
           {[
-            // Dana, a ne smena — ko radi međusmenu ima dve smene, a jednu dnevnicu.
-            [plural(calc.days, 'dan'), String(calc.days), ''],
             ['zarađeno', formatMoney(calc.earned, false), ''],
             calc.fromPercent > 0
               ? ['procenat', `+${formatMoney(calc.fromPercent, false)}`, '']
@@ -950,10 +1047,17 @@ export default function AdminWorkers() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 lg:shrink-0">
+      {/* Na telefonu sva dugmad stoje u JEDNOM redu ispod obračuna — svako
+          zauzima isti deo širine, pa ništa ne pada u novi red. */}
+      <div
+        className={cx(
+          'grid auto-cols-fr grid-flow-col gap-1.5 lg:flex lg:shrink-0 lg:items-center',
+        )}
+      >
         <Button
           variant="secondary"
           size="sm"
+          className="w-full px-1.5 lg:w-auto lg:px-3"
           onClick={() => {
             setForm({
               payout: calc.balance > 0 ? String(calc.balance) : '',
@@ -966,22 +1070,10 @@ export default function AdminWorkers() {
         >
           Isplati
         </Button>
-        {/* Dnevnice po danima — odatle se pojedinom danu umanjuje iznos. */}
-        {calc.model === 'dnevnica' && calc.days > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setWageRow(null)
-              setModal({ kind: 'dani', person, calc })
-            }}
-          >
-            Dnevnice
-          </Button>
-        )}
         <Button
           variant="ghost"
           size="sm"
+          className="w-full px-1.5 lg:w-auto lg:px-3"
           onClick={() => {
             setForm({ payout: '', paid_on: todayISO(), payout_note: '' })
             setPayoutToRemove(null)
@@ -992,11 +1084,21 @@ export default function AdminWorkers() {
         </Button>
         {/* Dodela priznanja — spisak bedževa je ispod, u svojoj sekciji. */}
         {badges.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={() => openBadges(person)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full px-1.5 lg:w-auto lg:px-3"
+            onClick={() => openBadges(person)}
+          >
             Bedževi
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={() => openEdit(person)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full px-1.5 lg:w-auto lg:px-3"
+          onClick={() => openEdit(person)}
+        >
           Izmeni
         </Button>
         {/* Neaktivan radnik se briše direktno sa spiska, bez ulaska u Izmeni. */}
@@ -1004,7 +1106,7 @@ export default function AdminWorkers() {
           <Button
             variant="ghost"
             size="sm"
-            className="text-rose-600"
+            className="w-full px-1.5 text-rose-600 lg:w-auto lg:px-3"
             onClick={() => setModal({ kind: 'delete', person, calc })}
           >
             Obriši
@@ -1315,7 +1417,12 @@ export default function AdminWorkers() {
               />
             </Field>
 
-            <PositionField form={form} setForm={setForm} />
+            <PositionField
+              form={form}
+              setForm={setForm}
+              positions={positions}
+              onAdded={async () => setPositions(await loadPositions())}
+            />
 
             <PayFields form={form} setForm={setForm} />
 
@@ -1405,7 +1512,12 @@ export default function AdminWorkers() {
                 />
               </Field>
 
-              <PositionField form={form} setForm={setForm} />
+              <PositionField
+                form={form}
+                setForm={setForm}
+                positions={positions}
+                onAdded={async () => setPositions(await loadPositions())}
+              />
 
               <PayFields form={form} setForm={setForm} />
 
@@ -1787,8 +1899,28 @@ export default function AdminWorkers() {
               />
             </Field>
 
-            <Field label="Znak">
-              <div className="flex flex-wrap gap-1.5">
+            <Field
+              label="Znak"
+              hint="Klikni ponuđeni ili upiši bilo koji svoj emodži u polje."
+            >
+              {/* Svoj znak — tastaturom za emodžije: Windows ⊞+. , telefon 😊 */}
+              <div className="flex items-center gap-2">
+                <input
+                  value={badgeForm.icon}
+                  onChange={(e) =>
+                    setBadgeForm((b) => ({ ...b, icon: [...e.target.value].slice(-2).join('') }))
+                  }
+                  aria-label="Znak bedža"
+                  className="h-12 w-16 rounded-xl border border-stone-300 bg-white text-center text-2xl outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30"
+                />
+                <p className="text-xs leading-relaxed text-stone-500">
+                  Tastatura sa emodžijima:
+                  <br />
+                  Windows <b>⊞ + .</b> · telefon dugme <b>😊</b>
+                </p>
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {BADGE_ICONS.map((ic) => (
                   <button
                     key={ic}
