@@ -4,22 +4,33 @@ import { supabase } from './supabaseClient'
  * Bedževi — priznanja koja admin dodeljuje radnicima (Radnik meseca, staž…).
  *
  * Spisak bedževa pravi admin; ko koji ima stoji u `worker_badges`. Svi
- * prijavljeni to vide na ekranu „Tim“, a menja samo admin.
+ * prijavljeni to vide na ekranu „Tim“, a menja samo admin. Uz svaki bedž
+ * stoji i šta je potrebno da se dobije, a posebno se vodi spisak radnika
+ * meseca (`monthly_winners`).
  */
 
 /** Svi bedževi, redom kojim ih je admin poređao. */
 export async function loadBadges({ onlyActive = false } = {}) {
-  let query = supabase
-    .from('badges')
-    .select('id, name, icon, description, sort_order, is_active')
-    .order('sort_order', { ascending: true })
-    .order('name', { ascending: true })
+  const build = (columns) => {
+    let query = supabase
+      .from('badges')
+      .select(columns)
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true })
+    if (onlyActive) query = query.eq('is_active', true)
+    return query
+  }
 
-  if (onlyActive) query = query.eq('is_active', true)
+  let { data, error } = await build('id, name, icon, description, requirement, sort_order, is_active')
 
-  const { data, error } = await query
-  if (error) throw error
-  return data ?? []
+  // Baza u kojoj skripta za uslove još nije puštena nema kolonu `requirement`.
+  if (error) {
+    const fallback = await build('id, name, icon, description, sort_order, is_active')
+    if (fallback.error) throw fallback.error
+    data = fallback.data
+  }
+
+  return (data ?? []).map((b) => ({ ...b, requirement: b.requirement ?? '' }))
 }
 
 /** Dodele: profil -> spisak id-jeva bedževa. */
@@ -68,4 +79,43 @@ export async function saveWorkerBadges(profileId, badgeIds, current, awardedBy) 
     )
     if (error) throw error
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Radnici meseca                                                     */
+/* ------------------------------------------------------------------ */
+const MESECI = [
+  'januar',
+  'februar',
+  'mart',
+  'april',
+  'maj',
+  'jun',
+  'jul',
+  'avgust',
+  'septembar',
+  'oktobar',
+  'novembar',
+  'decembar',
+]
+
+/** „2026-10-01“ → „oktobar 2026“ */
+export function monthLabel(dateISO) {
+  const [y, m] = String(dateISO ?? '').split('-')
+  const name = MESECI[Number(m) - 1]
+  return name ? `${name} ${y}` : '—'
+}
+
+/** Svi radnici meseca, najnoviji mesec prvi. Bez tabele — prazan spisak. */
+export async function loadMonthlyWinners() {
+  const { data, error } = await supabase
+    .from('monthly_winners')
+    .select('id, month, profile_id, note')
+    .order('month', { ascending: false })
+
+  if (error) {
+    console.error(error)
+    return []
+  }
+  return data ?? []
 }

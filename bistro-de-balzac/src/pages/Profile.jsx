@@ -1,5 +1,7 @@
 import { useAuth } from '../context/AuthContext'
 import { AvatarEditor } from '../components/Avatar'
+import BadgeInfo from '../components/BadgeInfo'
+import MyDetails from '../components/MyDetails'
 import RuleDocs from '../components/RuleDocs'
 import { Card } from '../components/ui'
 import { formatDate, formatMoney } from '../lib/utils'
@@ -7,11 +9,12 @@ import MyEarnings from './MyEarnings'
 import Team from './Team'
 
 /**
- * Profil radnika — redom:
- *   1. slika i osnovni podaci (ime, telefon, uloga, dnevnica)
- *   2. dnevnice (obračun, odrađene smene, bonusi i isplate)
- *   3. tim (ko je šta i ko ima koji bedž)
- *   4. pravila i obaveze (svaki dokument zatvoren dok se ne klikne)
+ * Profil radnika — jednostavno, od gore na dole:
+ *   1. slika, ime i jedan red (dnevnica, u timu od)
+ *   2. moji podaci (telefon i radno iskustvo — radnik ih upisuje sam)
+ *   3. dnevnice (obračun, odrađene smene, bonusi i isplate)
+ *   4. Tim, Bedževi, Radnici meseca — jedna kartica, tri reda koja se otvaraju
+ *   5. pravila i obaveze
  */
 export default function Profile() {
   const { profile, isAdmin, refreshProfile } = useAuth()
@@ -19,53 +22,45 @@ export default function Profile() {
   const naPlati = profile?.pay_model === 'plata'
   const procenat = Number(profile?.percent ?? 0)
 
-  const rows = [
-    ['Ime i prezime', profile?.full_name || '—'],
-    ['Broj telefona', profile?.phone || '—'],
-    ['Uloga', isAdmin ? 'Admin' : 'Radnik'],
+  // Sve što je ranije bilo u tabeli — u jednom redu ispod imena.
+  const meta = [
+    isAdmin ? 'Admin' : 'Radnik',
     naPlati
-      ? ['Plata', `${formatMoney(profile?.monthly_salary)} mesečno`]
-      : ['Dnevnica', formatMoney(profile?.daily_wage)],
-    procenat > 0 ? ['Procenat od pazara', `${procenat}%`] : null,
-    ['U timu od', profile?.created_at ? formatDate(profile.created_at.slice(0, 10)) : '—'],
+      ? `plata ${formatMoney(profile?.monthly_salary, false)}`
+      : `dnevnica ${formatMoney(profile?.daily_wage, false)}`,
+    procenat > 0 ? `${procenat}%` : null,
+    profile?.created_at ? `u timu od ${formatDate(profile.created_at.slice(0, 10))}` : null,
   ].filter(Boolean)
 
   return (
     <div className="space-y-4">
-      {/* ---------- Osnovni podaci ---------- */}
-      <Card>
-        <div className="px-4 py-4">
-          {profile && (
-            <AvatarEditor
-              person={profile}
-              className="h-[68px] w-[68px] bg-brand-600 text-xl text-white"
-              onChange={refreshProfile}
-            >
-              <h1 className="truncate text-lg font-bold tracking-tight text-stone-900">
-                {profile.full_name}
-              </h1>
-              <p className="text-sm text-stone-500">{isAdmin ? 'Admin' : 'Radnik'}</p>
-            </AvatarEditor>
-          )}
-        </div>
-
-        <dl className="divide-y divide-stone-100 border-t border-stone-100">
-          {rows.map(([label, value]) => (
-            <div key={label} className="flex items-center justify-between gap-4 px-4 py-2.5">
-              <dt className="text-[13px] text-stone-500">{label}</dt>
-              <dd className="min-w-0 truncate text-right text-sm font-semibold text-stone-900">
-                {value}
-              </dd>
-            </div>
-          ))}
-        </dl>
+      {/* ---------- Ja ---------- */}
+      <Card className="px-4 py-4">
+        {profile && (
+          <AvatarEditor
+            person={profile}
+            className="h-[68px] w-[68px] bg-brand-600 text-xl text-white"
+            onChange={refreshProfile}
+          >
+            <h1 className="truncate text-lg font-bold tracking-tight text-stone-900">
+              {profile.full_name}
+            </h1>
+            <p className="text-sm text-stone-500">{meta.join(' · ')}</p>
+          </AvatarEditor>
+        )}
       </Card>
+
+      {/* ---------- Telefon i radno iskustvo — radnik ih upisuje sam ---------- */}
+      <MyDetails />
 
       {/* ---------- Dnevnice ---------- */}
       <MyEarnings />
 
-      {/* ---------- Tim ---------- */}
-      <Team />
+      {/* ---------- Tim, Bedževi i Radnici meseca — jedna kartica ---------- */}
+      <Card className="divide-y divide-stone-100">
+        <Team bare />
+        <BadgeInfo bare />
+      </Card>
 
       {/* ---------- Pravila i obaveze ---------- */}
       <RuleDocs />

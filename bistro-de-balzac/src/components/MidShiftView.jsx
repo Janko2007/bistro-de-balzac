@@ -5,13 +5,14 @@ import { Card, CardHeader } from './ui'
 import { SHIFT_LABELS, cx, formatMoney, formatQty } from '../lib/utils'
 
 /**
- * Šta se dešava u prvoj i drugoj smeni — vidi samo onaj ko radi međusmenu.
+ * Prva i druga smena za onoga ko radi međusmenu — samo za gledanje.
  *
- * Međusmena hvata kraj prve i početak druge, pa taj radnik mora da zna šta
- * su oni upisali. Ovo je samo za gledanje — menja se u svojoj smeni.
+ * Dok te smene traju, radnik u njih ulazi sam i uređuje ih preko izbora
+ * smene gore. Ovde ostaju samo one koje ne može da menja, npr. već
+ * zatvorena prva smena — da vidi šta je u njoj upisano.
  */
-export default function MidShiftView({ date }) {
-  const [shifts, setShifts] = useState([])
+export default function MidShiftView({ date, myName }) {
+  const [allShifts, setAllShifts] = useState([])
   const [open, setOpen] = useState(() => new Set())
   const [loaded, setLoaded] = useState(false)
 
@@ -21,12 +22,20 @@ export default function MidShiftView({ date }) {
     if (error) {
       // Baza bez skripte za međusmenu — sekcija se prosto ne prikazuje.
       console.error(error)
-      setShifts([])
+      setAllShifts([])
     } else {
-      setShifts(Array.isArray(data) ? data : [])
+      setAllShifts(Array.isArray(data) ? data : [])
     }
     setLoaded(true)
   }, [date])
+
+  /* Smena u kojoj je radnik upisan i koja traje se uređuje gore — ovde
+     bi bila samo duplirana. */
+  const shifts = allShifts.filter((s) => {
+    const mine = Array.isArray(s.staff) && s.staff.includes(myName)
+    const editable = s.status === 'otvoren' || s.status === 'vracen'
+    return !(mine && editable)
+  })
 
   useEffect(() => {
     load()

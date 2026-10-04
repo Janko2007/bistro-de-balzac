@@ -171,7 +171,7 @@ const isDone = (row) =>
  */
 
 export default function NewReport() {
-  const { profile } = useAuth()
+  const { profile, isAdmin } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -197,6 +197,9 @@ export default function NewReport() {
   const [reportId, setReportId] = useState(null)
   const [status, setStatus] = useState(null)
   const [staff, setStaff] = useState([])
+  // Za koji je izveštaj učitano ko radi u njemu — dok to ne stigne, ne zna se
+  // da li je admin u smeni ili je samo uređuje.
+  const [staffFor, setStaffFor] = useState(null)
   const [rows, setRows] = useState({}) // { itemId: { s, d, p } } — p = prodato
   const [pazar, setPazar] = useState('') // ukupan pazar sa kase
   const [card, setCard] = useState('')
@@ -243,8 +246,19 @@ export default function NewReport() {
     rowsRef.current = rows
   }, [rows])
 
-  const editable = status === 'otvoren' || status === 'vracen'
-  const closed = status === 'poslat' || status === 'potvrdjen'
+  const submitted = status === 'poslat' || status === 'potvrdjen'
+
+  /* Admin uređuje tuđ popis — i dok traje, i posle predaje. Ne ulazi u smenu,
+     pa mu se ne računa dnevnica, a radnik ništa ne primeti osim promene.
+     Isto važi i kad otvori već predat popis u kome je sam radio. */
+  const adminEdit =
+    isAdmin &&
+    !!reportId &&
+    staffFor === reportId &&
+    (submitted || !staff.includes(profile?.id))
+
+  const editable = status === 'otvoren' || status === 'vracen' || (isAdmin && submitted)
+  const closed = submitted && !isAdmin
 
   // Dok stoji traka „Zatvori smenu“ (iznad donje navigacije), obaveštenja idu iznad nje.
   useToastOffset(134, !!reportId && editable)
@@ -333,6 +347,14 @@ export default function NewReport() {
     }
   }, [profile?.id, requestedId, loadMyOpen])
 
+  // U međusmeni se prva i druga pojavljuju kao „moje“ čim ih neko otvori —
+  // pa se spisak povremeno osveži, da se ✓ pojavi bez ručnog osvežavanja.
+  useEffect(() => {
+    if (shift !== 'medjusmena' || !reportId) return undefined
+    const timer = setInterval(loadMyOpen, 15000)
+    return () => clearInterval(timer)
+  }, [shift, reportId, loadMyOpen])
+
   /* ------------------------------------------------------------ */
   /*  Postoji li već smena za izabrani datum?                      */
   /*  Radnik po RLS pravilima ne vidi tuđu smenu, pa se pita        */
@@ -394,6 +416,7 @@ export default function NewReport() {
       .select('profile_id')
       .eq('report_id', id)
     setStaff((data ?? []).map((r) => r.profile_id))
+    setStaffFor(id)
   }, [])
 
   const loadReport = useCallback(
@@ -715,7 +738,13 @@ export default function NewReport() {
     if (value === shift) return
     if (reportId) await flushPending()
 
-    const mine = myOpen.find((r) => r.date === reportDate && r.shift === value)
+    let mine = myOpen.find((r) => r.date === reportDate && r.shift === value)
+    // Ko radi međusmenu, u prvu i drugu ulazi sam kad se one otvore — spisak
+    // se zato proveri ponovo pre nego što se kaže da u njoj nije.
+    if (!mine) {
+      const fresh = await loadMyOpen()
+      mine = fresh.find((r) => r.date === reportDate && r.shift === value)
+    }
     setShift(value)
     setStatus(null)
     setStaff([])
@@ -827,6 +856,9 @@ export default function NewReport() {
 
   useEffect(() => {
     if (!reportId || !editable) return
+    // Admin koji samo uređuje tuđ popis ne prepisuje ništa — to radi radnik
+    // u svojoj smeni. Čeka se i da se zna ko je u smeni.
+    if (adminEdit || staffFor !== reportId) return
     if (carriedCats.size === 0 || items.length === 0) return
     // Tek kad se učita ono što je već upisano — da se ne pregazi.
     if (rowsLoadedFor.current !== reportId) return
@@ -878,7 +910,7 @@ export default function NewReport() {
           prefilledFor.current = null
         }
       })
-  }, [reportId, editable, carriedCats, items, lastEnds, rows])
+  }, [reportId, editable, adminEdit, staffFor, carriedCats, items, lastEnds, rows])
 
   const doneCount = useMemo(() => items.filter((i) => isDone(rows[i.id])).length, [items, rows])
 
@@ -988,6 +1020,8 @@ export default function NewReport() {
   /** Dugme „Zatvori smenu“ ne šalje odmah — prvo pokaže obračun na potvrdu. */
   function openConfirm(e) {
     e.preventDefault()
+    // Enter u polju ne sme da „zatvori“ tuđu smenu dok je admin samo uređuje.
+    if (adminEdit) return
     const problem = validate()
     if (problem) {
       toast.error(problem)
@@ -1085,9 +1119,13 @@ export default function NewReport() {
                   key={s.value}
                   type="button"
                   onClick={() => switchShift(s.value)}
+                  // Admin koji uređuje tuđ popis ne prelazi u druge smene —
+                  // time bi ušao u njih i dobio dnevnicu.
+                  disabled={adminEdit && !active}
                   aria-pressed={active}
                   className={cx(
                     'relative rounded-2xl px-2 py-2.5 text-[13px] font-semibold transition',
+                    adminEdit && !active && 'opacity-40',
                     active
                       ? 'bg-ink text-white'
                       : mine
@@ -1105,11 +1143,7 @@ export default function NewReport() {
               )
             })}
           </div>
-          {myShiftsToday.size > 1 && (
-            <p className="hint">
-              Radiš {myShiftsToday.size} smene ovog dana — dnevnica je jedna.
-            </p>
-          )}
+          {myShiftsToday.size > 1 && <p className="hint">Jedna dnevnica za ceo dan.</p>}
         </div>
 
         {reportId ? (
@@ -1139,9 +1173,8 @@ export default function NewReport() {
                 </div>
               ))}
             </div>
-            <p className="hint">Isti popis za sve u smeni. Dnevnica se računa po danu.</p>
 
-            {editable && (
+            {editable && !adminEdit && (
               <Button
                 type="button"
                 variant="ghost"
@@ -1175,15 +1208,11 @@ export default function NewReport() {
               {peek === null ? 'Proveravam…' : joinsExisting ? 'Uđi u smenu' : 'Otvori smenu'}
             </Button>
 
-            <p className={cx('hint', (shiftTaken || midTaken) && 'text-rose-600')}>
-              {shiftTaken
-                ? 'Smena je zatvorena — izaberi drugu.'
-                : midTaken
-                  ? 'Međusmenu radi jedan radnik — idi u prvu ili drugu smenu.'
-                  : myShiftsToday.size > 0
-                    ? 'Već radiš ovaj dan — dnevnica ostaje jedna.'
-                    : 'Ulaskom u smenu ti se računa dnevnica.'}
-            </p>
+            {(shiftTaken || midTaken) && (
+              <p className="hint text-rose-600">
+                {shiftTaken ? 'Smena je zatvorena — izaberi drugu.' : 'Međusmenu radi jedan radnik.'}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -1210,26 +1239,20 @@ export default function NewReport() {
 
   /* Još nije ušao u smenu — ne prikazuje se popis. */
   if (!reportId) {
-    return (
-      <div className="space-y-4">
-        {shiftCard}
-        <Card>
-          <div className="p-6 text-center">
-            <p className="text-[13px] text-stone-400">
-              {shiftTaken
-                ? 'Smena je zatvorena.'
-                : joinsExisting
-                  ? 'Uđi u smenu da nastaviš popis.'
-                  : 'Otvori smenu da počne popis.'}
-            </p>
-          </div>
-        </Card>
-      </div>
-    )
+    // Dugme „Otvori / Uđi u smenu“ već kaže šta treba — bez dodatne kartice.
+    return <div className="space-y-4">{shiftCard}</div>
   }
 
   return (
     <form onSubmit={openConfirm} className="space-y-4 pb-28">
+      {/* Admin uređuje tuđ popis: ne ulazi u smenu, ne dobija dnevnicu. */}
+      {adminEdit && (
+        <div className="rounded-2xl bg-ink px-4 py-3 text-white">
+          <p className="text-sm font-bold">Uređuješ kao admin</p>
+          <p className="mt-0.5 text-xs text-stone-300">Ne računa ti se dnevnica. Izmene se čuvaju odmah.</p>
+        </div>
+      )}
+
       {shiftCard}
 
       {/* ---------- Pazar — otvara se klikom ---------- */}
@@ -1399,13 +1422,13 @@ export default function NewReport() {
                   >
                     {carried ? (
                       <>
-                        Početno je prepisano iz prošle smene — upiši samo prodato.
-                        {nextCountOn(cat) && ` Popis ${formatDate(nextCountOn(cat))}.`}
+                        Početno prepisano — upiši samo prodato.
+                        {nextCountOn(cat) && ` Popis ${formatDate(nextCountOn(cat))}`}
                       </>
                     ) : (
                       <>
-                        <b>Danas se popisuje</b> — izmeri i upiši početno stanje.
-                        {cat?.count_due && ' Admin je tražio popis.'}
+                        <b>Danas se popisuje</b> — upiši početno.
+                        {cat?.count_due && ' (traži admin)'}
                       </>
                     )}
                   </div>
@@ -1587,7 +1610,9 @@ export default function NewReport() {
       </Card>
 
       {/* ---------- Međusmena: šta rade prva i druga smena ---------- */}
-      {shift === 'medjusmena' && reportId && <MidShiftView date={reportDate} />}
+      {shift === 'medjusmena' && reportId && (
+        <MidShiftView date={reportDate} myName={profile?.full_name} />
+      )}
 
       {/* ---------- Slika izveštaja (kasa + aparat za kartice) ---------- */}
       <Card className={cx(images.length === 0 && 'ring-1 ring-rose-300')}>
@@ -1748,9 +1773,24 @@ export default function NewReport() {
               {formatMoney(Math.max(0, cashNum), false)}
             </p>
           </div>
-          <Button type="submit" size="lg" loading={submitting} className="shrink-0">
-            Zatvori smenu
-          </Button>
+          {adminEdit ? (
+            // Admin ne zatvara smenu — izmene su već sačuvane, samo se vraća na izveštaj.
+            <Button
+              type="button"
+              size="lg"
+              className="shrink-0"
+              onClick={async () => {
+                await flushPending()
+                navigate(`/izvestaj/${reportId}`)
+              }}
+            >
+              Gotovo
+            </Button>
+          ) : (
+            <Button type="submit" size="lg" loading={submitting} className="shrink-0">
+              Zatvori smenu
+            </Button>
+          )}
         </div>
       </div>
 

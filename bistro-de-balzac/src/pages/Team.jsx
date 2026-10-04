@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { loadBadges, loadWorkerBadges } from '../lib/badges'
 import Avatar from '../components/Avatar'
-import { Card, CardHeader, EmptyState } from '../components/ui'
+import { Card, EmptyState } from '../components/ui'
 import { cx, errorMessage } from '../lib/utils'
 
 /**
@@ -14,7 +14,10 @@ import { cx, errorMessage } from '../lib/utils'
  * Stoji na ekranu Profil, pa ga vide svi, i radnici. Ništa se odavde ne
  * menja; bedževe dodeljuje admin na ekranu Radnici.
  */
-export default function Team() {
+export default function Team({ bare = false }) {
+  // Unutar zajedničke kartice na Profilu (bare) nema svoje kartice.
+  const Shell = bare ? 'div' : Card
+
   const { profile } = useAuth()
   const toast = useToast()
 
@@ -22,6 +25,7 @@ export default function Team() {
   const [people, setPeople] = useState([])
   const [badges, setBadges] = useState([])
   const [owned, setOwned] = useState(new Map())
+  const [open, setOpen] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -52,25 +56,54 @@ export default function Team() {
     load()
   }, [load])
 
-  const badgeById = useMemo(() => new Map(badges.map((b) => [b.id, b])), [badges])
-
   // Deo je Profila — dok se učitava ne zauzima mesto.
   if (loading) return null
 
   return (
     <>
       {/* ---------- Ko je ko ---------- */}
-      <Card>
-        <CardHeader title="Tim" subtitle={String(people.length)} />
+      <Shell>
+        {/* Zatvoren dok se ne klikne — da se ne skroluje preko celog tima. */}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className={cx(
+            'flex w-full items-center gap-2.5 px-4 py-3.5 text-left transition',
+            open ? 'bg-stone-100' : 'hover:bg-stone-50',
+          )}
+        >
+          <svg
+            className={cx(
+              'h-4 w-4 shrink-0 text-stone-400 transition-transform',
+              open && 'rotate-90',
+            )}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+          <span className="min-w-0 flex-1 text-base font-extrabold tracking-tight text-stone-900">
+            Tim
+          </span>
+          <span className="shrink-0 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-stone-500">
+            {people.length}
+          </span>
+        </button>
 
-        {people.length === 0 ? (
+        {!open ? null : people.length === 0 ? (
           <EmptyState icon="👥" title="Nema radnika" />
         ) : (
           <ul className="divide-y divide-stone-100">
             {people.map((person) => {
-              const mine = (owned.get(person.id) ?? [])
-                .map((row) => badgeById.get(row.badge_id))
-                .filter(Boolean)
+              // Redosled kao u spisku bedževa — admin ga podešava u Radnici.
+              const ownedIds = new Set((owned.get(person.id) ?? []).map((row) => row.badge_id))
+              const mine = badges.filter((b) => ownedIds.has(b.id))
 
               return (
                 <li key={person.id} className="flex items-start gap-3 px-4 py-3">
@@ -115,7 +148,7 @@ export default function Team() {
             })}
           </ul>
         )}
-      </Card>
+      </Shell>
     </>
   )
 }

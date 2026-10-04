@@ -56,6 +56,7 @@ export default function ReportDetail() {
   const [adminNote, setAdminNote] = useState('')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [staffOpen, setStaffOpen] = useState(false)
+  const [staffToRemove, setStaffToRemove] = useState(null) // radnik kome se traži potvrda uklanjanja
   const [allWorkers, setAllWorkers] = useState([])
   const [staffDraft, setStaffDraft] = useState([])
   const [categories, setCategories] = useState([])
@@ -286,6 +287,25 @@ export default function ReportDetail() {
     load()
   }
 
+  /** Skida jednog radnika iz smene; obračun se preračunava sam. */
+  async function removeFromShift(profileId) {
+    setWorking(true)
+    const { error } = await supabase
+      .from('shift_report_staff')
+      .delete()
+      .eq('report_id', id)
+      .eq('profile_id', profileId)
+    setWorking(false)
+    setStaffToRemove(null)
+
+    if (error) {
+      toast.error(errorMessage(error))
+      return
+    }
+    toast.success('Uklonjen iz smene — dnevnica je preračunata.')
+    load()
+  }
+
   async function saveStaff() {
     setWorking(true)
     const current = (report.staff ?? []).map((s) => s.profile?.id).filter(Boolean)
@@ -444,7 +464,6 @@ export default function ReportDetail() {
       subtitle: `${SHIFT_LABELS[report.shift]} · ${STATUS_LABELS[report.status] ?? report.status}`,
       meta: [
         { label: 'U smeni', value: staffLine },
-        { label: 'Poslao', value: report.creator?.full_name || '—' },
         report.status === 'potvrdjen' && report.verified_at
           ? { label: 'Potvrdio', value: `${report.verifier?.full_name || 'Admin'}, ${formatDateTime(report.verified_at)}` }
           : null,
@@ -526,9 +545,9 @@ export default function ReportDetail() {
               </Badge>
               <Badge className={STATUS_STYLES[report.status]}>{STATUS_LABELS[report.status]}</Badge>
             </div>
-            <p className="mt-1 text-[12px] text-stone-400">
-              {report.creator?.full_name || '—'} · {formatDateTime(report.created_at)}
-            </p>
+            {/* Samo vreme. Ko je radio smenu piše ispod („U smeni radili“) — onaj
+                ko ju je otvorio ne mora da bude među njima. */}
+            <p className="mt-1 text-[12px] text-stone-400">{formatDateTime(report.created_at)}</p>
             {report.status === 'potvrdjen' && report.verified_at && (
               <p className="mt-1 text-[12px] font-medium text-emerald-700">
                 Potvrdio {report.verifier?.full_name || 'admin'} ·{' '}
@@ -601,10 +620,8 @@ export default function ReportDetail() {
                   const cut = entry.wage_override !== null && entry.wage_override !== undefined
                   const plata = entry.profile?.pay_model === 'plata'
                   return (
-                    <li
-                      key={entry.profile.id}
-                      className="flex items-center justify-between gap-2 py-1.5"
-                    >
+                    <li key={entry.profile.id} className="py-1.5">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-800">
                         {entry.profile.full_name}
                       </span>
@@ -634,6 +651,49 @@ export default function ReportDetail() {
                       >
                         {cut ? 'Izmeni' : 'Umanji'}
                       </Button>
+                      {/* Uklanja radnika iz smene — gubi dnevnicu za ovaj dan. */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setStaffToRemove((p) => (p === entry.profile.id ? null : entry.profile.id))
+                        }
+                        aria-label={`Ukloni ${entry.profile.full_name} iz smene`}
+                        title="Ukloni iz smene"
+                        className="shrink-0 rounded-md px-1.5 text-base leading-none text-stone-400 transition hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    {staffToRemove === entry.profile.id && (
+                      <div className="mt-2 rounded-lg bg-rose-50 p-2.5 ring-1 ring-inset ring-rose-200">
+                        <p className="text-xs font-bold text-rose-900">
+                          Ukloniti {entry.profile.full_name} iz smene?
+                        </p>
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-rose-800">
+                          Za ovaj dan mu se ne računa dnevnica.
+                        </p>
+                        <div className="mt-2 flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setStaffToRemove(null)}
+                          >
+                            Ne
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            loading={working}
+                            onClick={() => removeFromShift(entry.profile.id)}
+                          >
+                            Da, ukloni
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                     </li>
                   )
                 })}
@@ -951,6 +1011,17 @@ export default function ReportDetail() {
                 Poništi potvrdu
               </Button>
             )}
+
+            {/* Admin menja popis sam, bez vraćanja radniku. Ne ulazi u smenu,
+                pa mu se ne računa dnevnica. */}
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => navigate(`/novi-popis?izvestaj=${report.id}`)}
+              disabled={working}
+            >
+              ✏️ Uredi popis
+            </Button>
 
             <Button
               variant="secondary"

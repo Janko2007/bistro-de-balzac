@@ -197,7 +197,7 @@ export default function AdminDashboard() {
     const rows = reports.map((r) => [
       r.report_date,
       SHIFT_LABELS[r.shift] ?? r.shift,
-      namesOf(r).join(', ') || (r.created_by_name ?? ''),
+      namesOf(r).join(', '),
       r.total_amount,
       r.card_amount,
       r.cash_amount,
@@ -249,7 +249,7 @@ export default function AdminDashboard() {
         rows.push([
           formatDate(r.report_date),
           SHIFT_LABELS[r.shift] ?? r.shift,
-          namesOf(r).join(', ') || r.created_by_name || '—',
+          namesOf(r).join(', ') || '—',
           STATUS_LABELS[r.status] ?? r.status,
           formatMoney(r.total_amount, false),
           formatMoney(r.card_amount, false),
