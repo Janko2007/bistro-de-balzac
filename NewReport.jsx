@@ -171,13 +171,14 @@ const isDone = (row) =>
  */
 
 export default function NewReport() {
-  const { profile } = useAuth()
+  const { profile, isAdmin } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   // „Ispravi popis“ sa izveštaja vodi ovde sa ?izvestaj=<id> — otvara baš taj popis.
   const requestedId = searchParams.get('izvestaj')
   const fileInputRef = useRef(null)
+  const galleryInputRef = useRef(null)
 
   const [loading, setLoading] = useState(true)
   const [items, setItems] = useState([])
@@ -197,6 +198,14 @@ export default function NewReport() {
   const [reportId, setReportId] = useState(null)
   const [status, setStatus] = useState(null)
   const [staff, setStaff] = useState([])
+  // Za koji je izveštaj učitano ko radi u njemu — dok to ne stigne, ne zna se
+  // da li je admin u smeni ili je samo uređuje.
+  const [staffFor, setStaffFor] = useState(null)
+  // Ko je tog dana u međusmeni — pored imena piše „Među“.
+  const [midNames, setMidNames] = useState([])
+  const [midBusy, setMidBusy] = useState(false)
+  // Radnik potvrđuje stanje artikala pre zatvaranja smene.
+  const [stateOk, setStateOk] = useState(false)
   const [rows, setRows] = useState({}) // { itemId: { s, d, p } } — p = prodato
   const [pazar, setPazar] = useState('') // ukupan pazar sa kase
   const [card, setCard] = useState('')
@@ -243,8 +252,19 @@ export default function NewReport() {
     rowsRef.current = rows
   }, [rows])
 
-  const editable = status === 'otvoren' || status === 'vracen'
-  const closed = status === 'poslat' || status === 'potvrdjen'
+  const submitted = status === 'poslat' || status === 'potvrdjen'
+
+  /* Admin uređuje tuđ popis — i dok traje, i posle predaje. Ne ulazi u smenu,
+     pa mu se ne računa dnevnica, a radnik ništa ne primeti osim promene.
+     Isto važi i kad otvori već predat popis u kome je sam radio. */
+  const adminEdit =
+    isAdmin &&
+    !!reportId &&
+    staffFor === reportId &&
+    (submitted || !staff.includes(profile?.id))
+
+  const editable = status === 'otvoren' || status === 'vracen' || (isAdmin && submitted)
+  const closed = submitted && !isAdmin
 
   // Dok stoji traka „Zatvori smenu“ (iznad donje navigacije), obaveštenja idu iznad nje.
   useToastOffset(134, !!reportId && editable)
@@ -323,15 +343,50 @@ export default function NewReport() {
         return
       }
       if (!list.length) return
-      setReportDate(list[0].date)
-      setShift(list[0].shift)
-      setReportId(list[0].id)
+      // Najnoviji datum; istog dana prva pre međusmene i druge.
+      const order = (s) => SHIFTS.findIndex((x) => x.value === s)
+      const first = [...list]
+        .filter((r) => r.date === list[0].date && r.shift !== 'medjusmena')
+        .sort((a, b) => order(a.shift) - order(b.shift))[0]
+      if (!first) return
+      setReportDate(first.date)
+      setShift(first.shift)
+      setReportId(first.id)
     })
 
     return () => {
       active = false
     }
   }, [profile?.id, requestedId, loadMyOpen])
+
+  // U međusmeni se prva i druga pojavljuju kao „moje“ čim ih neko otvori —
+  // pa se spisak povremeno osveži, da se ✓ pojavi bez ručnog osvežavanja.
+  useEffect(() => {
+    if (shift !== 'medjusmena' || !reportId) return undefined
+    const timer = setInterval(loadMyOpen, 15000)
+    return () => clearInterval(timer)
+  }, [shift, reportId, loadMyOpen])
+
+  useEffect(() => {
+    if (!reportId || !reportDate) {
+      setMidNames([])
+      return undefined
+    }
+    let active = true
+    const load = () =>
+      supabase
+        .rpc('peek_shift', { p_date: reportDate, p_shift: 'medjusmena' })
+        .then(({ data, error }) => {
+          if (!active || error) return
+          setMidNames(data?.[0]?.staff_names ?? [])
+        })
+    load()
+    const timer = setInterval(load, 20000)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [reportId, reportDate, staff])
 
   /* ------------------------------------------------------------ */
   /*  Postoji li već smena za izabrani datum?                      */
@@ -394,6 +449,7 @@ export default function NewReport() {
       .select('profile_id')
       .eq('report_id', id)
     setStaff((data ?? []).map((r) => r.profile_id))
+    setStaffFor(id)
   }, [])
 
   const loadReport = useCallback(
@@ -698,6 +754,53 @@ export default function NewReport() {
     joinsExisting &&
     (peek.names ?? []).some((n) => n !== profile?.full_name)
 
+  /** Radim li tog dana međusmenu (upisan sam u nju). */
+  const isMidMe = myOpen.some((r) => r.date === reportDate && r.shift === 'medjusmena')
+  /** Ako međusmenu radi neko drugi — njegovo ime, inače null. */
+  const midOther = midNames.find((nm) => nm !== profile?.full_name) ?? null
+
+  /**
+   * Uključuje ili isključuje međusmenu. Uključivanje te upisuje u međusmenu, a
+   * baza te sama ubaci u prvu i drugu čim postoje. Isključivanje te vadi iz
+   * međusmene i iz one od prve/druge u kojoj trenutno nisi na ekranu.
+   */
+  async function toggleMid() {
+    if (!reportId) return
+    setMidBusy(true)
+    try {
+      await flushPending()
+      if (isMidMe) {
+        const mine = myOpen.filter((r) => r.date === reportDate)
+        const mid = mine.find((r) => r.shift === 'medjusmena')
+        const other = mine.find((r) => r.shift !== 'medjusmena' && r.id !== reportId)
+        for (const r of [mid, other]) {
+          if (!r) continue
+          const { error } = await supabase
+            .from('shift_report_staff')
+            .delete()
+            .eq('report_id', r.id)
+            .eq('profile_id', profile.id)
+          if (error) throw error
+        }
+        toast.info('Međusmena je isključena.')
+      } else {
+        const { error } = await supabase.rpc('open_or_join_shift', {
+          p_date: reportDate,
+          p_shift: 'medjusmena',
+        })
+        if (error) throw error
+        toast.success('Međusmena je uključena.')
+      }
+      await loadMyOpen()
+      await loadStaff(reportId)
+    } catch (err) {
+      console.error(err)
+      toast.error(errorMessage(err, 'Međusmena nije promenjena.'))
+    } finally {
+      setMidBusy(false)
+    }
+  }
+
   /** Koje smene tog dana radnik već ima otvorene. */
   const myShiftsToday = useMemo(
     () => new Set(myOpen.filter((r) => r.date === reportDate).map((r) => r.shift)),
@@ -715,7 +818,18 @@ export default function NewReport() {
     if (value === shift) return
     if (reportId) await flushPending()
 
-    const mine = myOpen.find((r) => r.date === reportDate && r.shift === value)
+    let mine = myOpen.find((r) => r.date === reportDate && r.shift === value)
+    // Ko radi međusmenu, u prvu i drugu ulazi sam kad se one otvore — spisak
+    // se zato proveri ponovo pre nego što se kaže da u njoj nije.
+    if (!mine) {
+      const fresh = await loadMyOpen()
+      mine = fresh.find((r) => r.date === reportDate && r.shift === value)
+    }
+    openShiftView(value, mine ? mine.id : null)
+  }
+
+  /** Prikaz jedne smene: prazni sve što pripada prethodnoj pa učitava ovu. */
+  function openShiftView(value, id) {
     setShift(value)
     setStatus(null)
     setStaff([])
@@ -725,7 +839,23 @@ export default function NewReport() {
     setCard('')
     setNote('')
     setTaskDone(false)
-    setReportId(mine ? mine.id : null)
+    setReportId(id)
+  }
+
+  /**
+   * Ko radi međusmenu ima i prvu i drugu: posle ulaska u međusmenu ili zatvaranja
+   * jedne smene otvara se sledeća koja mu je ostala — prvo prva, pa druga.
+   * Vraća true ako je neka otvorena.
+   */
+  async function goToNextMine(excludeId) {
+    const list = await loadMyOpen()
+    const order = (s) => SHIFTS.findIndex((x) => x.value === s)
+    const next = list
+      .filter((r) => r.date === reportDate && r.id !== excludeId && r.shift !== 'medjusmena')
+      .sort((a, b) => order(a.shift) - order(b.shift))[0]
+    if (!next) return false
+    openShiftView(next.shift, next.id)
+    return true
   }
 
   async function joinShift() {
@@ -744,6 +874,8 @@ export default function NewReport() {
     toast.success(
       joinsExisting ? 'Ušao si u smenu — dnevnica ti se računa.' : 'Smena je otvorena.',
     )
+    // Međusmena: odmah se vidi popis prve smene (pa druge), da ih uređuješ.
+    if (shift === 'medjusmena') await goToNextMine(data)
   }
 
   async function leaveShift() {
@@ -823,64 +955,83 @@ export default function NewReport() {
     [categories, reportDate],
   )
 
-  const prefilledFor = useRef(null)
+  /* Krajnje stanje PRETHODNE smene, ponovo pročitano iz baze — ne ono što je
+     bilo kad je ekran otvoren. Prva smena često upiše prodato tek pri predaji,
+     pa se broj menja i posle ulaska druge smene. `endsFor` kaže za koju je smenu
+     ovaj spisak tačan (bez toga se radi sa starijim snimkom, samo jednom). */
+  const [endsFor, setEndsFor] = useState(null)
+
+  const refreshEnds = useCallback(async () => {
+    const id = reportIdRef.current
+    if (!id) return
+    const { data, error } = await supabase.rpc('previous_item_end', { p_report_id: id })
+    // Funkcije nema dok skripta za bazu nije puštena — ostaje stariji snimak.
+    if (error || !Array.isArray(data) || reportIdRef.current !== id) return
+    setLastEnds(new Map(data.map((r) => [r.item_id, Number(r.qty_end)])))
+    setEndsFor(id)
+  }, [])
 
   useEffect(() => {
-    if (!reportId || !editable) return
-    if (carriedCats.size === 0 || items.length === 0) return
-    // Tek kad se učita ono što je već upisano — da se ne pregazi.
-    if (rowsLoadedFor.current !== reportId) return
-    if (prefilledFor.current === reportId) return
+    if (!reportId || status !== 'otvoren' || adminEdit || carriedCats.size === 0) return undefined
 
-    const todo = items.filter(
-      (i) => carriedCats.has(i.category) && lastEnds.has(i.id) && (rows[i.id]?.s ?? '') === '',
-    )
-    if (todo.length === 0) {
-      prefilledFor.current = reportId
-      return
+    refreshEnds()
+    const timer = setInterval(refreshEnds, 15000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshEnds()
     }
-    prefilledFor.current = reportId
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [reportId, status, adminEdit, carriedCats, refreshEnds])
 
-    const fresh = {}
-    const payload = todo.map((item) => {
-      const mode = modeOf(item)
-      const start = lastEnds.get(item.id)
+  /* Početno kod ređe popisivanih grupa UVEK prati krajnje stanje prethodne
+     smene dok ova traje. Radnik ga ne kuca, pa nema šta da se pregazi; unos
+     „prodato“ i „dodato“ ostaje, a krajnje se računa iznova. */
+  useEffect(() => {
+    // Admin koji samo uređuje tuđ popis ne prepisuje ništa. Čeka se i da se
+    // zna ko je u smeni, i da se učita ono što je već upisano.
+    if (!reportId || status !== 'otvoren' || adminEdit || staffFor !== reportId) return
+    if (carriedCats.size === 0 || items.length === 0) return
+    if (rowsLoadedFor.current !== reportId) return
+
+    const exact = endsFor === reportId
+
+    for (const item of items) {
+      if (!carriedCats.has(item.category) || !lastEnds.has(item.id)) continue
+      if (dirtyItems.current.has(item.id)) continue
+
+      const want = lastEnds.get(item.id)
+      const have = rows[item.id]?.s ?? ''
+
+      // Tačan spisak: početno se uvek izjednači. Stariji snimak: samo se popuni
+      // prazno polje, da se ne pregazi nešto što je već upisano.
+      const needs = have === '' || (exact && round2(parseNumber(have)) !== round2(want))
+      if (!needs) continue
+
+      setCell(item.id, 's', String(want))
       // Kod „krajnje“ (voće) se i krajnje prepisuje, da prodato ispadne nula.
-      const row = {
-        s: String(start),
-        d: '',
-        p: '',
-        e: mode === 'krajnje' ? String(start) : '',
+      if (modeOf(item) === 'krajnje' && (rows[item.id]?.e ?? '') === '') {
+        setCell(item.id, 'e', String(want))
       }
-      fresh[item.id] = row
-      return {
-        report_id: reportId,
-        item_id: item.id,
-        item_name: item.name,
-        unit: item.unit,
-        category: item.category,
-        qty_start: start,
-        qty_added: null,
-        qty_sold: soldOf(row, mode),
-        qty_end: endOf(row, mode),
-        is_counter: mode === 'brojac',
-        count_mode: mode,
-      }
-    })
-
-    setRows((prev) => ({ ...fresh, ...prev }))
-    supabase
-      .from('shift_report_items')
-      .upsert(payload, { onConflict: 'report_id,item_id' })
-      .then(({ error }) => {
-        if (error) {
-          console.error(error)
-          prefilledFor.current = null
-        }
-      })
-  }, [reportId, editable, carriedCats, items, lastEnds, rows])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportId, status, adminEdit, staffFor, carriedCats, items, lastEnds, endsFor, rows])
 
   const doneCount = useMemo(() => items.filter((i) => isDone(rows[i.id])).length, [items, rows])
+
+  /* Popisani artikli po grupama — za potvrdu stanja pri zatvaranju smene. */
+  const confirmList = useMemo(() => {
+    const compare = categoryComparator(categories)
+    const map = new Map()
+    for (const item of items) {
+      if (!isDone(rows[item.id])) continue
+      if (!map.has(item.category)) map.set(item.category, [])
+      map.get(item.category).push(item)
+    }
+    return Array.from(map.entries()).sort((a, b) => compare(a[0], b[0]))
+  }, [items, rows, categories])
 
   /** Artikli kod kojih je prodato veće od novog stanja — greška u unosu. */
   const errorCount = useMemo(
@@ -988,6 +1139,8 @@ export default function NewReport() {
   /** Dugme „Zatvori smenu“ ne šalje odmah — prvo pokaže obračun na potvrdu. */
   function openConfirm(e) {
     e.preventDefault()
+    // Enter u polju ne sme da „zatvori“ tuđu smenu dok je admin samo uređuje.
+    if (adminEdit) return
     const problem = validate()
     if (problem) {
       toast.error(problem)
@@ -995,6 +1148,7 @@ export default function NewReport() {
       if (pazar === '' || cardTooBig) setPazarOpen(true)
       return
     }
+    setStateOk(false)
     setConfirmOpen(true)
   }
 
@@ -1026,6 +1180,8 @@ export default function NewReport() {
 
       setConfirmOpen(false)
       toast.success('Smena je zatvorena i poslata adminu.')
+      // Ko radi međusmenu ostaje u popisu — sledi druga smena (ili prva).
+      if (await goToNextMine(reportId)) return
       navigate(`/izvestaj/${reportId}`, { replace: true })
     } catch (err) {
       console.error(err)
@@ -1076,8 +1232,8 @@ export default function NewReport() {
             ih može biti i više označenih. */}
         <div>
           <span className="label">Smena</span>
-          <div className="grid grid-cols-3 gap-1.5">
-            {SHIFTS.map((s) => {
+          <div className="grid grid-cols-2 gap-1.5">
+            {SHIFTS.filter((s) => s.value !== 'medjusmena').map((s) => {
               const mine = myShiftsToday.has(s.value)
               const active = s.value === shift
               return (
@@ -1085,9 +1241,13 @@ export default function NewReport() {
                   key={s.value}
                   type="button"
                   onClick={() => switchShift(s.value)}
+                  // Admin koji uređuje tuđ popis ne prelazi u druge smene —
+                  // time bi ušao u njih i dobio dnevnicu.
+                  disabled={adminEdit && !active}
                   aria-pressed={active}
                   className={cx(
                     'relative rounded-2xl px-2 py-2.5 text-[13px] font-semibold transition',
+                    adminEdit && !active && 'opacity-40',
                     active
                       ? 'bg-ink text-white'
                       : mine
@@ -1105,11 +1265,7 @@ export default function NewReport() {
               )
             })}
           </div>
-          {myShiftsToday.size > 1 && (
-            <p className="hint">
-              Radiš {myShiftsToday.size} smene ovog dana — dnevnica je jedna.
-            </p>
-          )}
+          {myShiftsToday.size > 1 && <p className="hint">Jedna dnevnica za ceo dan.</p>}
         </div>
 
         {reportId ? (
@@ -1136,21 +1292,66 @@ export default function NewReport() {
                     )}
                   />
                   {person.name}
+                  {midNames.includes(person.name) && (
+                    <span
+                      className={cx(
+                        'rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                        person.id === profile?.id
+                          ? 'bg-white/25 text-white'
+                          : 'bg-brand-100 text-brand-800',
+                      )}
+                    >
+                      Među
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
-            <p className="hint">Isti popis za sve u smeni. Dnevnica se računa po danu.</p>
 
-            {editable && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="mt-2 px-0 text-rose-600"
-                onClick={() => setLeaveOpen(true)}
-              >
-                Izađi iz smene
-              </Button>
+            {/* Međusmena: radiš i prvu i drugu, a dnevnica je jedna. Uključuje se
+                odavde, iz bilo koje od te dve smene. Radi je samo jedan radnik. */}
+            {editable && !adminEdit && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={toggleMid}
+                  disabled={midBusy || (!isMidMe && midOther !== null)}
+                  aria-pressed={isMidMe}
+                  className={cx(
+                    'flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition',
+                    isMidMe
+                      ? 'bg-brand-50 ring-1 ring-inset ring-brand-600/30'
+                      : 'bg-stone-100 hover:bg-stone-200/70 disabled:opacity-50',
+                  )}
+                >
+                  <span
+                    className={cx(
+                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold',
+                      isMidMe ? 'bg-brand-600 text-white' : 'bg-white text-transparent ring-1 ring-inset ring-stone-300',
+                    )}
+                    aria-hidden="true"
+                  >
+                    ✓
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold text-stone-900">Međusmena</span>
+                    {/* Piše se samo kad je polje zaključano, da se zna zašto. */}
+                    {!isMidMe && midOther && (
+                      <span className="block text-[11px] text-stone-500">{`Radi ${midOther}`}</span>
+                    )}
+                  </span>
+                </button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1 px-0 text-rose-600"
+                  onClick={() => setLeaveOpen(true)}
+                >
+                  Izađi iz smene
+                </Button>
+              </div>
             )}
           </div>
         ) : (
@@ -1175,15 +1376,11 @@ export default function NewReport() {
               {peek === null ? 'Proveravam…' : joinsExisting ? 'Uđi u smenu' : 'Otvori smenu'}
             </Button>
 
-            <p className={cx('hint', (shiftTaken || midTaken) && 'text-rose-600')}>
-              {shiftTaken
-                ? 'Smena je zatvorena — izaberi drugu.'
-                : midTaken
-                  ? 'Međusmenu radi jedan radnik — idi u prvu ili drugu smenu.'
-                  : myShiftsToday.size > 0
-                    ? 'Već radiš ovaj dan — dnevnica ostaje jedna.'
-                    : 'Ulaskom u smenu ti se računa dnevnica.'}
-            </p>
+            {(shiftTaken || midTaken) && (
+              <p className="hint text-rose-600">
+                {shiftTaken ? 'Smena je zatvorena — izaberi drugu.' : 'Međusmenu radi jedan radnik.'}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -1210,26 +1407,20 @@ export default function NewReport() {
 
   /* Još nije ušao u smenu — ne prikazuje se popis. */
   if (!reportId) {
-    return (
-      <div className="space-y-4">
-        {shiftCard}
-        <Card>
-          <div className="p-6 text-center">
-            <p className="text-[13px] text-stone-400">
-              {shiftTaken
-                ? 'Smena je zatvorena.'
-                : joinsExisting
-                  ? 'Uđi u smenu da nastaviš popis.'
-                  : 'Otvori smenu da počne popis.'}
-            </p>
-          </div>
-        </Card>
-      </div>
-    )
+    // Dugme „Otvori / Uđi u smenu“ već kaže šta treba — bez dodatne kartice.
+    return <div className="space-y-4">{shiftCard}</div>
   }
 
   return (
     <form onSubmit={openConfirm} className="space-y-4 pb-28">
+      {/* Admin uređuje tuđ popis: ne ulazi u smenu, ne dobija dnevnicu. */}
+      {adminEdit && (
+        <div className="rounded-2xl bg-ink px-4 py-3 text-white">
+          <p className="text-sm font-bold">Uređuješ kao admin</p>
+          <p className="mt-0.5 text-xs text-stone-300">Ne računa ti se dnevnica. Izmene se čuvaju odmah.</p>
+        </div>
+      )}
+
       {shiftCard}
 
       {/* ---------- Pazar — otvara se klikom ---------- */}
@@ -1399,13 +1590,13 @@ export default function NewReport() {
                   >
                     {carried ? (
                       <>
-                        Početno je prepisano iz prošle smene — upiši samo prodato.
-                        {nextCountOn(cat) && ` Popis ${formatDate(nextCountOn(cat))}.`}
+                        Početno prepisano — upiši samo prodato.
+                        {nextCountOn(cat) && ` Popis ${formatDate(nextCountOn(cat))}`}
                       </>
                     ) : (
                       <>
-                        <b>Danas se popisuje</b> — izmeri i upiši početno stanje.
-                        {cat?.count_due && ' Admin je tražio popis.'}
+                        <b>Danas se popisuje</b> — upiši početno.
+                        {cat?.count_due && ' (traži admin)'}
                       </>
                     )}
                   </div>
@@ -1587,7 +1778,9 @@ export default function NewReport() {
       </Card>
 
       {/* ---------- Međusmena: šta rade prva i druga smena ---------- */}
-      {shift === 'medjusmena' && reportId && <MidShiftView date={reportDate} />}
+      {isMidMe && reportId && (
+        <MidShiftView date={reportDate} myName={profile?.full_name} />
+      )}
 
       {/* ---------- Slika izveštaja (kasa + aparat za kartice) ---------- */}
       <Card className={cx(images.length === 0 && 'ring-1 ring-rose-300')}>
@@ -1616,15 +1809,36 @@ export default function NewReport() {
             className="hidden"
           />
 
-          <Button
-            type="button"
-            variant={images.length === 0 ? 'primary' : 'secondary'}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={images.length >= 6 || uploading}
-            loading={uploading}
-          >
-            {images.length === 0 ? 'Slikaj izveštaje' : 'Dodaj još'}
-          </Button>
+          {/* Isti izbor iz galerije: bez `capture` telefon otvara galeriju
+              (ili pita kamera / galerija), pa se postojeća slika ubacuje kao izveštaj. */}
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFiles}
+            className="hidden"
+          />
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={images.length === 0 ? 'primary' : 'secondary'}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={images.length >= 6 || uploading}
+              loading={uploading}
+            >
+              {images.length === 0 ? 'Slikaj' : 'Slikaj još'}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => galleryInputRef.current?.click()}
+              disabled={images.length >= 6 || uploading}
+            >
+              Galerija
+            </Button>
+          </div>
 
           {/* Pravilo je kratko koliko može, ali mora da ostane: jedna slika,
               dva izveštaja, i koji od dva sa aparata zavisi od smene. */}
@@ -1748,9 +1962,24 @@ export default function NewReport() {
               {formatMoney(Math.max(0, cashNum), false)}
             </p>
           </div>
-          <Button type="submit" size="lg" loading={submitting} className="shrink-0">
-            Zatvori smenu
-          </Button>
+          {adminEdit ? (
+            // Admin ne zatvara smenu — izmene su već sačuvane, samo se vraća na izveštaj.
+            <Button
+              type="button"
+              size="lg"
+              className="shrink-0"
+              onClick={async () => {
+                await flushPending()
+                navigate(`/izvestaj/${reportId}`)
+              }}
+            >
+              Gotovo
+            </Button>
+          ) : (
+            <Button type="submit" size="lg" loading={submitting} className="shrink-0">
+              Zatvori smenu
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1829,6 +2058,7 @@ export default function NewReport() {
               variant="success"
               className="flex-1"
               loading={submitting}
+              disabled={!stateOk}
               onClick={closeShift}
             >
               Zatvori smenu
@@ -1866,6 +2096,47 @@ export default function NewReport() {
           <div className="flex items-center justify-between gap-3 rounded-2xl bg-ink px-4 py-3.5 text-white">
             <p className="eyebrow text-stone-400">Predato</p>
             <p className="text-2xl font-extrabold tabular-nums">{formatMoney(cashNum, false)}</p>
+          </div>
+
+          {/* Stanje artikala: krajnje stanje svakog popisanog artikla. Radnik ga
+              pregleda i potvrđuje kvačicom — bez nje se smena ne zatvara. */}
+          <div>
+            <p className="eyebrow mb-1.5">Stanje artikala</p>
+            <div className="max-h-56 overflow-y-auto rounded-2xl border border-stone-200">
+              {confirmList.map(([category, list]) => (
+                <div key={category}>
+                  <p className="sticky top-0 bg-stone-100 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-stone-500">
+                    {category}
+                  </p>
+                  {list.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm">
+                      <span className="min-w-0 truncate text-stone-700">{item.name}</span>
+                      <span className="shrink-0 font-bold tabular-nums text-stone-900">
+                        {formatQty(endOf(rows[item.id] ?? EMPTY_ROW, modeOf(item)))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setStateOk((v) => !v)}
+              aria-pressed={stateOk}
+              className="mt-3 flex w-full items-center gap-3 rounded-2xl bg-stone-100 px-3.5 py-3 text-left transition hover:bg-stone-200/70"
+            >
+              <span
+                className={cx(
+                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold',
+                  stateOk ? 'bg-emerald-600 text-white' : 'bg-white text-transparent ring-1 ring-inset ring-stone-300',
+                )}
+                aria-hidden="true"
+              >
+                ✓
+              </span>
+              <span className="text-sm font-semibold text-stone-800">Potvrđujem da je stanje artikala tačno</span>
+            </button>
           </div>
 
           <p className="text-[12px] text-stone-400">

@@ -6,6 +6,7 @@ import { useToast, useToastOffset } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { categoryComparator, loadCategories } from '../lib/categories'
 import { heading, printDocument, statGrid, table, textBlock } from '../lib/print'
+import CompareShifts from '../components/CompareShifts'
 import ReportPicker from '../components/ReportPicker'
 import {
   Badge,
@@ -56,6 +57,8 @@ export default function ReportDetail() {
   const [adminNote, setAdminNote] = useState('')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [staffOpen, setStaffOpen] = useState(false)
+  const [compareOpen, setCompareOpen] = useState(false)
+  const [staffToRemove, setStaffToRemove] = useState(null) // radnik kome se traži potvrda uklanjanja
   const [allWorkers, setAllWorkers] = useState([])
   const [staffDraft, setStaffDraft] = useState([])
   const [categories, setCategories] = useState([])
@@ -64,7 +67,10 @@ export default function ReportDetail() {
   const [wageEdit, setWageEdit] = useState(null)
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase
+    /* Kolone za proveru stanja postoje tek posle skripte za bazu; bez nje se
+       izveštaj učitava bez njih, pa ostaje upotrebljiv. */
+    const build = (withCheck) =>
+      supabase
       .from('shift_reports')
       .select(
         `
@@ -75,13 +81,18 @@ export default function ReportDetail() {
         staff:shift_report_staff ( wage_override, profile:profiles ( id, full_name, pay_model, daily_wage ) ),
         items:shift_report_items (
           id, item_id, item_name, unit, category,
-          qty_start, qty_added, qty_new, qty_sold, qty_end, is_counter, note
+          qty_start, qty_added, qty_new, qty_sold, qty_end, is_counter, note${withCheck ? ', check_status, check_qty' : ''}
         ),
         images:report_images ( id, storage_path, created_at )
       `,
       )
       .eq('id', id)
       .maybeSingle()
+
+    let { data, error } = await build(true)
+    if (error && /check_(status|qty)/.test(error.message ?? '')) {
+      ;({ data, error } = await build(false))
+    }
 
     if (error) {
       toast.error(errorMessage(error))
@@ -213,6 +224,12 @@ export default function ReportDetail() {
   const [itemFilter, setItemFilter] = useState('sve') // 'sve' | 'nepopisano' | 'nije'
 
   // Nije prodat = popisan (ima krajnje stanje), a prodato je tačno 0.
+  /* Artikli kod kojih je admin označio da se stanje ne poklapa. */
+  const mismatches = useMemo(
+    () => allRows.filter((i) => i.check_status === 'fali'),
+    [allRows],
+  )
+
   const isUnsold = (i) => !i.missing && Number(i.qty_sold) === 0
 
   const itemCounts = useMemo(
@@ -283,6 +300,43 @@ export default function ReportDetail() {
     }
     setWageEdit(null)
     toast.success(override === null ? 'Vraćena puna dnevnica.' : 'Dnevnica je umanjena za ovaj dan.')
+    load()
+  }
+
+  /**
+   * Admin proverava stanje artikla: ✓ (tačno) ili ✗ (ne poklapa se), uz tačan
+   * broj. Ponovni klik na isto skida oznaku. Radnik vidi samo ishod.
+   */
+  async function setCheck(item, status, qty = null) {
+    if (!item.id) return
+    const payload = { check_status: status, check_qty: status === 'fali' ? qty : null }
+    const { error } = await supabase.from('shift_report_items').update(payload).eq('id', item.id)
+    if (error) {
+      toast.error(errorMessage(error))
+      return
+    }
+    setReport((r) => ({
+      ...r,
+      items: (r.items ?? []).map((i) => (i.id === item.id ? { ...i, ...payload } : i)),
+    }))
+  }
+
+  /** Skida jednog radnika iz smene; obračun se preračunava sam. */
+  async function removeFromShift(profileId) {
+    setWorking(true)
+    const { error } = await supabase
+      .from('shift_report_staff')
+      .delete()
+      .eq('report_id', id)
+      .eq('profile_id', profileId)
+    setWorking(false)
+    setStaffToRemove(null)
+
+    if (error) {
+      toast.error(errorMessage(error))
+      return
+    }
+    toast.success('Uklonjen iz smene — dnevnica je preračunata.')
     load()
   }
 
@@ -444,7 +498,6 @@ export default function ReportDetail() {
       subtitle: `${SHIFT_LABELS[report.shift]} · ${STATUS_LABELS[report.status] ?? report.status}`,
       meta: [
         { label: 'U smeni', value: staffLine },
-        { label: 'Poslao', value: report.creator?.full_name || '—' },
         report.status === 'potvrdjen' && report.verified_at
           ? { label: 'Potvrdio', value: `${report.verifier?.full_name || 'Admin'}, ${formatDateTime(report.verified_at)}` }
           : null,
@@ -526,9 +579,9 @@ export default function ReportDetail() {
               </Badge>
               <Badge className={STATUS_STYLES[report.status]}>{STATUS_LABELS[report.status]}</Badge>
             </div>
-            <p className="mt-1 text-[12px] text-stone-400">
-              {report.creator?.full_name || '—'} · {formatDateTime(report.created_at)}
-            </p>
+            {/* Samo vreme. Ko je radio smenu piše ispod („U smeni radili“) — onaj
+                ko ju je otvorio ne mora da bude među njima. */}
+            <p className="mt-1 text-[12px] text-stone-400">{formatDateTime(report.created_at)}</p>
             {report.status === 'potvrdjen' && report.verified_at && (
               <p className="mt-1 text-[12px] font-medium text-emerald-700">
                 Potvrdio {report.verifier?.full_name || 'admin'} ·{' '}
@@ -601,10 +654,8 @@ export default function ReportDetail() {
                   const cut = entry.wage_override !== null && entry.wage_override !== undefined
                   const plata = entry.profile?.pay_model === 'plata'
                   return (
-                    <li
-                      key={entry.profile.id}
-                      className="flex items-center justify-between gap-2 py-1.5"
-                    >
+                    <li key={entry.profile.id} className="py-1.5">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-800">
                         {entry.profile.full_name}
                       </span>
@@ -634,6 +685,49 @@ export default function ReportDetail() {
                       >
                         {cut ? 'Izmeni' : 'Umanji'}
                       </Button>
+                      {/* Uklanja radnika iz smene — gubi dnevnicu za ovaj dan. */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setStaffToRemove((p) => (p === entry.profile.id ? null : entry.profile.id))
+                        }
+                        aria-label={`Ukloni ${entry.profile.full_name} iz smene`}
+                        title="Ukloni iz smene"
+                        className="shrink-0 rounded-md px-1.5 text-base leading-none text-stone-400 transition hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    {staffToRemove === entry.profile.id && (
+                      <div className="mt-2 rounded-lg bg-rose-50 p-2.5 ring-1 ring-inset ring-rose-200">
+                        <p className="text-xs font-bold text-rose-900">
+                          Ukloniti {entry.profile.full_name} iz smene?
+                        </p>
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-rose-800">
+                          Za ovaj dan mu se ne računa dnevnica.
+                        </p>
+                        <div className="mt-2 flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setStaffToRemove(null)}
+                          >
+                            Ne
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            loading={working}
+                            onClick={() => removeFromShift(entry.profile.id)}
+                          >
+                            Da, ukloni
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                     </li>
                   )
                 })}
@@ -822,6 +916,23 @@ export default function ReportDetail() {
           </p>
         ) : (
           <div className="divide-y divide-stone-100">
+            {mismatches.length > 0 && (
+              <div className="bg-rose-50 px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-rose-700">
+                  Stanje se ne poklapa
+                </p>
+                <ul className="mt-1.5 space-y-0.5 text-sm text-rose-900">
+                  {mismatches.map((i) => (
+                    <li key={i.key}>
+                      <b>{i.item_name}</b> · upisano {formatQty(i.qty_end)}
+                      {i.check_qty !== null && i.check_qty !== undefined
+                        ? `, tačno ${formatQty(i.check_qty)}`
+                        : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {visibleGroups.map(([category, catItems]) => {
               // U filtriranom prikazu kategorije su odmah otvorene — da se vidi šta je izdvojeno.
               const open = itemFilter !== 'sve' || openCats.has(category)
@@ -850,7 +961,7 @@ export default function ReportDetail() {
 
                   {open && (
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[500px] border-collapse text-sm">
+                      <table className="w-full min-w-[560px] border-collapse text-sm">
                         <thead>
                           <tr className="border-b border-stone-100 text-[10px] font-bold uppercase tracking-wide text-stone-400">
                             <th className="px-4 py-2 text-left">Artikal</th>
@@ -858,7 +969,8 @@ export default function ReportDetail() {
                             <th className="px-2 py-2 text-right">Dodato</th>
                             <th className="px-2 py-2 text-right">Novo</th>
                             <th className="px-2 py-2 text-right">Prodato</th>
-                            <th className="px-4 py-2 text-right">Krajnje</th>
+                            <th className="px-2 py-2 text-right">Krajnje</th>
+                            <th className="px-4 py-2 text-right">Provera</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -904,8 +1016,83 @@ export default function ReportDetail() {
                               >
                                 {formatQty(item.qty_sold)}
                               </td>
-                              <td className="px-4 py-2 text-right font-semibold tabular-nums text-stone-700">
+                              <td className="px-2 py-2 text-right font-semibold tabular-nums text-stone-700">
                                 {formatQty(item.qty_end)}
+                              </td>
+                              <td className="px-4 py-2">
+                                {item.id && isAdmin ? (
+                                  <div className="flex items-center justify-end gap-1">
+                                    {item.check_status === 'fali' && (
+                                      <input
+                                        key={`${item.key}-${item.check_qty}`}
+                                        type="number"
+                                        inputMode="decimal"
+                                        step="0.01"
+                                        min="0"
+                                        placeholder="tačno"
+                                        aria-label={`${item.item_name} — tačno stanje`}
+                                        defaultValue={item.check_qty ?? ''}
+                                        onBlur={(e) =>
+                                          setCheck(
+                                            item,
+                                            'fali',
+                                            e.target.value === '' ? null : Number(e.target.value),
+                                          )
+                                        }
+                                        className="w-[72px] rounded-lg border border-rose-300 bg-white px-1.5 py-1 text-center text-sm font-bold tabular-nums outline-none focus:ring-2 focus:ring-rose-500/30"
+                                      />
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCheck(item, item.check_status === 'ok' ? null : 'ok')
+                                      }
+                                      aria-pressed={item.check_status === 'ok'}
+                                      aria-label={`${item.item_name} — stanje tačno`}
+                                      className={cx(
+                                        'h-7 w-7 rounded-lg text-sm font-bold transition',
+                                        item.check_status === 'ok'
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-stone-100 text-stone-400 hover:bg-emerald-50 hover:text-emerald-700',
+                                      )}
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCheck(
+                                          item,
+                                          item.check_status === 'fali' ? null : 'fali',
+                                          item.check_qty ?? null,
+                                        )
+                                      }
+                                      aria-pressed={item.check_status === 'fali'}
+                                      aria-label={`${item.item_name} — stanje se ne poklapa`}
+                                      className={cx(
+                                        'h-7 w-7 rounded-lg text-sm font-bold transition',
+                                        item.check_status === 'fali'
+                                          ? 'bg-rose-600 text-white'
+                                          : 'bg-stone-100 text-stone-400 hover:bg-rose-50 hover:text-rose-700',
+                                      )}
+                                    >
+                                      ✗
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="text-right text-xs font-bold">
+                                    {item.check_status === 'ok' && (
+                                      <span className="text-emerald-700">✓</span>
+                                    )}
+                                    {item.check_status === 'fali' && (
+                                      <span className="text-rose-600">
+                                        ✗{item.check_qty !== null && item.check_qty !== undefined
+                                          ? ` ${formatQty(item.check_qty)}`
+                                          : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -952,6 +1139,26 @@ export default function ReportDetail() {
               </Button>
             )}
 
+            {/* Admin menja popis sam, bez vraćanja radniku. Ne ulazi u smenu,
+                pa mu se ne računa dnevnica. */}
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => setCompareOpen(true)}
+              disabled={working}
+            >
+              ⇄ Uporedi
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => navigate(`/novi-popis?izvestaj=${report.id}`)}
+              disabled={working}
+            >
+              ✏️ Uredi popis
+            </Button>
+
             <Button
               variant="secondary"
               size="lg"
@@ -979,6 +1186,9 @@ export default function ReportDetail() {
           Admin je vratio ovaj popis na ispravku. Pošalji novi, ispravan popis za ovu smenu.
         </div>
       )}
+
+      {/* ---------- Poređenje sa drugom smenom ---------- */}
+      {compareOpen && <CompareShifts report={report} onClose={() => setCompareOpen(false)} />}
 
       {/* ---------- Modali ---------- */}
       <ReportPicker

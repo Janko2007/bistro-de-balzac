@@ -97,7 +97,23 @@ export default function ReportListItem({
             <ShiftTag shift={report.shift} />
             {showAuthor && (
               <span className="min-w-0 truncate text-[13.5px] font-semibold text-stone-900">
-                {staffNames.length > 0 ? staffNames.join(', ') : 'nema upisanih'}
+                {staffNames.length > 0
+                  ? staffNames.map((s, i) => {
+                      const name = typeof s === 'string' ? s : s.name
+                      const mid = typeof s === 'string' ? false : s.mid
+                      return (
+                        <span key={`${name}-${i}`}>
+                          {i > 0 && ', '}
+                          {name}
+                          {mid && (
+                            <span className="ml-1 rounded-md bg-brand-100 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-brand-800">
+                              Među
+                            </span>
+                          )}
+                        </span>
+                      )
+                    })
+                  : 'nema upisanih'}
               </span>
             )}
           </span>

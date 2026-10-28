@@ -6,6 +6,7 @@ import { cx } from '../lib/utils'
 import Avatar from './Avatar'
 import { Button } from './ui'
 import InstallPrompt from './InstallPrompt'
+import AnnouncementGate from './AnnouncementGate'
 
 /* Vreme pravljenja verzije — upisuje ga Vite pri objavi (vidi vite.config.js).
    U razvoju te promenljive nema, pa stoji rezerva. */
@@ -187,6 +188,9 @@ export default function Layout() {
       </main>
 
       <InstallPrompt />
+
+      {/* Obaveštenja koja iskaču jednom — čim se radnik prijavi ili vrati u aplikaciju. */}
+      <AnnouncementGate />
 
       {/* ---------- Donja navigacija (mobilni) ---------- */}
       {/* Fiksna visina i zabranjen prelom teksta — dugmad stoje na istom

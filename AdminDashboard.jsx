@@ -49,6 +49,9 @@ export default function AdminDashboard() {
 
   const [loading, setLoading] = useState(true)
   const [reports, setReports] = useState([])
+  // Datum -> ko je tog dana radio međusmenu. Međusmena nema svoj red u spisku;
+  // pored imena u prvoj i drugoj smeni piše „Među“.
+  const [midByDate, setMidByDate] = useState(() => new Map())
   const [workers, setWorkers] = useState([])
 
   // Podrazumevano se vide samo juče i danas — ostalo se otvara kroz filtere.
@@ -104,10 +107,28 @@ export default function AdminDashboard() {
     if (status) query = query.eq('status', status)
     if (worker) query = query.eq('created_by', worker)
 
-    const { data, error } = await query
+    // Međusmena se ne prikazuje kao posebna smena — samo prva i druga.
+    const [{ data, error }, midRes] = await Promise.all([
+      query.neq('shift', 'medjusmena'),
+      supabase
+        .from('report_summary')
+        .select('report_date, staff_ids')
+        .eq('shift', 'medjusmena')
+        .gte('report_date', rangeFrom)
+        .lte('report_date', rangeTo),
+    ])
 
     if (error) toast.error(errorMessage(error))
-    else setReports(data ?? [])
+    else {
+      setReports(data ?? [])
+      const mid = new Map()
+      for (const r of midRes.data ?? []) {
+        const set = mid.get(r.report_date) ?? new Set()
+        for (const wid of r.staff_ids ?? []) set.add(wid)
+        mid.set(r.report_date, set)
+      }
+      setMidByDate(mid)
+    }
     setLoading(false)
   }, [rangeFrom, rangeTo, shift, status, worker, toast])
 
@@ -136,12 +157,29 @@ export default function AdminDashboard() {
   const nameById = useMemo(() => new Map(workers.map((w) => [w.id, w.full_name])), [workers])
 
   const namesOf = useCallback(
-    (report) =>
-      (report.staff_ids ?? [])
-        .map((wid) => nameById.get(wid))
+    (report) => {
+      const mid = midByDate.get(report.report_date)
+      return (report.staff_ids ?? [])
+        .map((wid) => {
+          const name = nameById.get(wid)
+          return name ? (mid?.has(wid) ? `${name} (Među)` : name) : null
+        })
         .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b)),
-    [nameById],
+        .sort((a, b) => a.localeCompare(b))
+    },
+    [nameById, midByDate],
+  )
+
+  /** Isto, ali kao objekti — oznaka „Među“ se na listi crta pored imena. */
+  const staffOf = useCallback(
+    (report) => {
+      const mid = midByDate.get(report.report_date)
+      return (report.staff_ids ?? [])
+        .map((wid) => ({ name: nameById.get(wid), mid: !!mid?.has(wid) }))
+        .filter((s) => s.name)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    },
+    [nameById, midByDate],
   )
 
   /**
@@ -197,7 +235,7 @@ export default function AdminDashboard() {
     const rows = reports.map((r) => [
       r.report_date,
       SHIFT_LABELS[r.shift] ?? r.shift,
-      namesOf(r).join(', ') || (r.created_by_name ?? ''),
+      namesOf(r).join(', '),
       r.total_amount,
       r.card_amount,
       r.cash_amount,
@@ -249,7 +287,7 @@ export default function AdminDashboard() {
         rows.push([
           formatDate(r.report_date),
           SHIFT_LABELS[r.shift] ?? r.shift,
-          namesOf(r).join(', ') || r.created_by_name || '—',
+          namesOf(r).join(', ') || '—',
           STATUS_LABELS[r.status] ?? r.status,
           formatMoney(r.total_amount, false),
           formatMoney(r.card_amount, false),
@@ -425,7 +463,7 @@ export default function AdminDashboard() {
               <Field label="Smena">
                 <Select value={shift} onChange={(e) => setShift(e.target.value)}>
                   <option value="">Sve smene</option>
-                  {SHIFTS.map((s) => (
+                  {SHIFTS.filter((s) => s.value !== 'medjusmena').map((s) => (
                     <option key={s.value} value={s.value}>
                       {s.label}
                     </option>
@@ -579,7 +617,7 @@ export default function AdminDashboard() {
                         key={report.id}
                         report={report}
                         showAuthor
-                        staffNames={namesOf(report)}
+                        staffNames={staffOf(report)}
                       />
                     ))}
                   </div>
