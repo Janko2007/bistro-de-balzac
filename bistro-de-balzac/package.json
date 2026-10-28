@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node update.mjs && vite build",
     "preview": "vite preview",
     "icons": "powershell -ExecutionPolicy Bypass -File scripts/generate-icons.ps1"
   },
