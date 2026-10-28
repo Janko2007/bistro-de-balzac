@@ -178,6 +178,7 @@ export default function NewReport() {
   // „Ispravi popis“ sa izveštaja vodi ovde sa ?izvestaj=<id> — otvara baš taj popis.
   const requestedId = searchParams.get('izvestaj')
   const fileInputRef = useRef(null)
+  const galleryInputRef = useRef(null)
 
   const [loading, setLoading] = useState(true)
   const [items, setItems] = useState([])
@@ -200,7 +201,11 @@ export default function NewReport() {
   // Za koji je izveštaj učitano ko radi u njemu — dok to ne stigne, ne zna se
   // da li je admin u smeni ili je samo uređuje.
   const [staffFor, setStaffFor] = useState(null)
-  // Ko je tog dana u međusmeni — pored imena piše 
+  // Ko je tog dana u međusmeni — pored imena piše „Među“.
+  const [midNames, setMidNames] = useState([])
+  const [midBusy, setMidBusy] = useState(false)
+  // Radnik potvrđuje stanje artikala pre zatvaranja smene.
+  const [stateOk, setStateOk] = useState(false)
   const [rows, setRows] = useState({}) // { itemId: { s, d, p } } — p = prodato
   const [pazar, setPazar] = useState('') // ukupan pazar sa kase
   const [card, setCard] = useState('')
@@ -341,8 +346,9 @@ export default function NewReport() {
       // Najnoviji datum; istog dana prva pre međusmene i druge.
       const order = (s) => SHIFTS.findIndex((x) => x.value === s)
       const first = [...list]
-        .filter((r) => r.date === list[0].date)
+        .filter((r) => r.date === list[0].date && r.shift !== 'medjusmena')
         .sort((a, b) => order(a.shift) - order(b.shift))[0]
+      if (!first) return
       setReportDate(first.date)
       setShift(first.shift)
       setReportId(first.id)
@@ -748,6 +754,53 @@ export default function NewReport() {
     joinsExisting &&
     (peek.names ?? []).some((n) => n !== profile?.full_name)
 
+  /** Radim li tog dana međusmenu (upisan sam u nju). */
+  const isMidMe = myOpen.some((r) => r.date === reportDate && r.shift === 'medjusmena')
+  /** Ako međusmenu radi neko drugi — njegovo ime, inače null. */
+  const midOther = midNames.find((nm) => nm !== profile?.full_name) ?? null
+
+  /**
+   * Uključuje ili isključuje međusmenu. Uključivanje te upisuje u međusmenu, a
+   * baza te sama ubaci u prvu i drugu čim postoje. Isključivanje te vadi iz
+   * međusmene i iz one od prve/druge u kojoj trenutno nisi na ekranu.
+   */
+  async function toggleMid() {
+    if (!reportId) return
+    setMidBusy(true)
+    try {
+      await flushPending()
+      if (isMidMe) {
+        const mine = myOpen.filter((r) => r.date === reportDate)
+        const mid = mine.find((r) => r.shift === 'medjusmena')
+        const other = mine.find((r) => r.shift !== 'medjusmena' && r.id !== reportId)
+        for (const r of [mid, other]) {
+          if (!r) continue
+          const { error } = await supabase
+            .from('shift_report_staff')
+            .delete()
+            .eq('report_id', r.id)
+            .eq('profile_id', profile.id)
+          if (error) throw error
+        }
+        toast.info('Međusmena je isključena.')
+      } else {
+        const { error } = await supabase.rpc('open_or_join_shift', {
+          p_date: reportDate,
+          p_shift: 'medjusmena',
+        })
+        if (error) throw error
+        toast.success('Međusmena — radiš prvu i drugu, a dnevnica je jedna.')
+      }
+      await loadMyOpen()
+      await loadStaff(reportId)
+    } catch (err) {
+      console.error(err)
+      toast.error(errorMessage(err, 'Međusmena nije promenjena.'))
+    } finally {
+      setMidBusy(false)
+    }
+  }
+
   /** Koje smene tog dana radnik već ima otvorene. */
   const myShiftsToday = useMemo(
     () => new Set(myOpen.filter((r) => r.date === reportDate).map((r) => r.shift)),
@@ -968,6 +1021,18 @@ export default function NewReport() {
 
   const doneCount = useMemo(() => items.filter((i) => isDone(rows[i.id])).length, [items, rows])
 
+  /* Popisani artikli po grupama — za potvrdu stanja pri zatvaranju smene. */
+  const confirmList = useMemo(() => {
+    const compare = categoryComparator(categories)
+    const map = new Map()
+    for (const item of items) {
+      if (!isDone(rows[item.id])) continue
+      if (!map.has(item.category)) map.set(item.category, [])
+      map.get(item.category).push(item)
+    }
+    return Array.from(map.entries()).sort((a, b) => compare(a[0], b[0]))
+  }, [items, rows, categories])
+
   /** Artikli kod kojih je prodato veće od novog stanja — greška u unosu. */
   const errorCount = useMemo(
     () =>
@@ -1083,6 +1148,7 @@ export default function NewReport() {
       if (pazar === '' || cardTooBig) setPazarOpen(true)
       return
     }
+    setStateOk(false)
     setConfirmOpen(true)
   }
 
@@ -1166,8 +1232,8 @@ export default function NewReport() {
             ih može biti i više označenih. */}
         <div>
           <span className="label">Smena</span>
-          <div className="grid grid-cols-3 gap-1.5">
-            {SHIFTS.map((s) => {
+          <div className="grid grid-cols-2 gap-1.5">
+            {SHIFTS.filter((s) => s.value !== 'medjusmena').map((s) => {
               const mine = myShiftsToday.has(s.value)
               const active = s.value === shift
               return (
@@ -1242,16 +1308,53 @@ export default function NewReport() {
               ))}
             </div>
 
+            {/* Međusmena: radiš i prvu i drugu, a dnevnica je jedna. Uključuje se
+                odavde, iz bilo koje od te dve smene. Radi je samo jedan radnik. */}
             {editable && !adminEdit && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="mt-2 px-0 text-rose-600"
-                onClick={() => setLeaveOpen(true)}
-              >
-                Izađi iz smene
-              </Button>
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={toggleMid}
+                  disabled={midBusy || (!isMidMe && midOther !== null)}
+                  aria-pressed={isMidMe}
+                  className={cx(
+                    'flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition',
+                    isMidMe
+                      ? 'bg-brand-50 ring-1 ring-inset ring-brand-600/30'
+                      : 'bg-stone-100 hover:bg-stone-200/70 disabled:opacity-50',
+                  )}
+                >
+                  <span
+                    className={cx(
+                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold',
+                      isMidMe ? 'bg-brand-600 text-white' : 'bg-white text-transparent ring-1 ring-inset ring-stone-300',
+                    )}
+                    aria-hidden="true"
+                  >
+                    ✓
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold text-stone-900">Međusmena</span>
+                    <span className="block text-[11px] text-stone-500">
+                      {isMidMe
+                        ? 'Radiš prvu i drugu — jedna dnevnica'
+                        : midOther
+                          ? `Radi ${midOther}`
+                          : 'Radim i prvu i drugu smenu'}
+                    </span>
+                  </span>
+                </button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1 px-0 text-rose-600"
+                  onClick={() => setLeaveOpen(true)}
+                >
+                  Izađi iz smene
+                </Button>
+              </div>
             )}
           </div>
         ) : (
@@ -1678,7 +1781,7 @@ export default function NewReport() {
       </Card>
 
       {/* ---------- Međusmena: šta rade prva i druga smena ---------- */}
-      {shift === 'medjusmena' && reportId && (
+      {isMidMe && reportId && (
         <MidShiftView date={reportDate} myName={profile?.full_name} />
       )}
 
@@ -1709,15 +1812,36 @@ export default function NewReport() {
             className="hidden"
           />
 
-          <Button
-            type="button"
-            variant={images.length === 0 ? 'primary' : 'secondary'}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={images.length >= 6 || uploading}
-            loading={uploading}
-          >
-            {images.length === 0 ? 'Slikaj izveštaje' : 'Dodaj još'}
-          </Button>
+          {/* Isti izbor iz galerije: bez `capture` telefon otvara galeriju
+              (ili pita kamera / galerija), pa se postojeća slika ubacuje kao izveštaj. */}
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFiles}
+            className="hidden"
+          />
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={images.length === 0 ? 'primary' : 'secondary'}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={images.length >= 6 || uploading}
+              loading={uploading}
+            >
+              {images.length === 0 ? 'Slikaj' : 'Slikaj još'}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => galleryInputRef.current?.click()}
+              disabled={images.length >= 6 || uploading}
+            >
+              Galerija
+            </Button>
+          </div>
 
           {/* Pravilo je kratko koliko može, ali mora da ostane: jedna slika,
               dva izveštaja, i koji od dva sa aparata zavisi od smene. */}
@@ -1937,6 +2061,7 @@ export default function NewReport() {
               variant="success"
               className="flex-1"
               loading={submitting}
+              disabled={!stateOk}
               onClick={closeShift}
             >
               Zatvori smenu
@@ -1974,6 +2099,47 @@ export default function NewReport() {
           <div className="flex items-center justify-between gap-3 rounded-2xl bg-ink px-4 py-3.5 text-white">
             <p className="eyebrow text-stone-400">Predato</p>
             <p className="text-2xl font-extrabold tabular-nums">{formatMoney(cashNum, false)}</p>
+          </div>
+
+          {/* Stanje artikala: krajnje stanje svakog popisanog artikla. Radnik ga
+              pregleda i potvrđuje kvačicom — bez nje se smena ne zatvara. */}
+          <div>
+            <p className="eyebrow mb-1.5">Stanje artikala</p>
+            <div className="max-h-56 overflow-y-auto rounded-2xl border border-stone-200">
+              {confirmList.map(([category, list]) => (
+                <div key={category}>
+                  <p className="sticky top-0 bg-stone-100 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-stone-500">
+                    {category}
+                  </p>
+                  {list.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm">
+                      <span className="min-w-0 truncate text-stone-700">{item.name}</span>
+                      <span className="shrink-0 font-bold tabular-nums text-stone-900">
+                        {formatQty(endOf(rows[item.id] ?? EMPTY_ROW, modeOf(item)))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setStateOk((v) => !v)}
+              aria-pressed={stateOk}
+              className="mt-3 flex w-full items-center gap-3 rounded-2xl bg-stone-100 px-3.5 py-3 text-left transition hover:bg-stone-200/70"
+            >
+              <span
+                className={cx(
+                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold',
+                  stateOk ? 'bg-emerald-600 text-white' : 'bg-white text-transparent ring-1 ring-inset ring-stone-300',
+                )}
+                aria-hidden="true"
+              >
+                ✓
+              </span>
+              <span className="text-sm font-semibold text-stone-800">Potvrđujem da je stanje artikala tačno</span>
+            </button>
           </div>
 
           <p className="text-[12px] text-stone-400">
