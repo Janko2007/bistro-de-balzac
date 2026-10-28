@@ -789,7 +789,7 @@ export default function NewReport() {
           p_shift: 'medjusmena',
         })
         if (error) throw error
-        toast.success('Međusmena — radiš prvu i drugu, a dnevnica je jedna.')
+        toast.success('Međusmena je uključena.')
       }
       await loadMyOpen()
       await loadStaff(reportId)
@@ -1335,13 +1335,10 @@ export default function NewReport() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-bold text-stone-900">Međusmena</span>
-                    <span className="block text-[11px] text-stone-500">
-                      {isMidMe
-                        ? 'Radiš prvu i drugu — jedna dnevnica'
-                        : midOther
-                          ? `Radi ${midOther}`
-                          : 'Radim i prvu i drugu smenu'}
-                    </span>
+                    {/* Piše se samo kad je polje zaključano, da se zna zašto. */}
+                    {!isMidMe && midOther && (
+                      <span className="block text-[11px] text-stone-500">{`Radi ${midOther}`}</span>
+                    )}
                   </span>
                 </button>
 

@@ -1,5 +1,7 @@
 import { useAuth } from '../context/AuthContext'
 import { AvatarEditor } from '../components/Avatar'
+import AboutApp from '../components/AboutApp'
+import AnnouncementList from '../components/AnnouncementList'
 import BadgeInfo from '../components/BadgeInfo'
 import MyDetails from '../components/MyDetails'
 import RuleDocs from '../components/RuleDocs'
@@ -58,12 +60,16 @@ export default function Profile() {
 
       {/* ---------- Tim, Bedževi i Radnici meseca — jedna kartica ---------- */}
       <Card className="divide-y divide-stone-100">
+        <AnnouncementList bare />
         <Team bare />
         <BadgeInfo bare />
       </Card>
 
       {/* ---------- Pravila i obaveze ---------- */}
       <RuleDocs />
+
+      {/* ---------- O aplikaciji: logo, Instagram, sajt (radnička verzija) ---------- */}
+      {!isAdmin && <AboutApp />}
     </div>
   )
 }

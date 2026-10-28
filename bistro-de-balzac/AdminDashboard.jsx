@@ -170,6 +170,18 @@ export default function AdminDashboard() {
     [nameById, midByDate],
   )
 
+  /** Isto, ali kao objekti — oznaka „Među“ se na listi crta pored imena. */
+  const staffOf = useCallback(
+    (report) => {
+      const mid = midByDate.get(report.report_date)
+      return (report.staff_ids ?? [])
+        .map((wid) => ({ name: nameById.get(wid), mid: !!mid?.has(wid) }))
+        .filter((s) => s.name)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    },
+    [nameById, midByDate],
+  )
+
   /**
    * Grupisanje po datumu za pregledniju listu.
    * Unutar dana smene idu redom kako se rade: prva, međusmena, druga.
@@ -605,7 +617,7 @@ export default function AdminDashboard() {
                         key={report.id}
                         report={report}
                         showAuthor
-                        staffNames={namesOf(report)}
+                        staffNames={staffOf(report)}
                       />
                     ))}
                   </div>

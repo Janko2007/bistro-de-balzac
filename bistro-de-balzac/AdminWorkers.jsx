@@ -13,6 +13,7 @@ import {
 } from '../lib/badges'
 import { addPosition, joinPositions, loadPositions, parsePositions } from '../lib/positions'
 import { currentPeriod, periodLabel } from '../lib/payperiod'
+import AnnouncementAdmin from '../components/AnnouncementAdmin'
 import Avatar, { AvatarEditor } from '../components/Avatar'
 import PeriodPicker from '../components/PeriodPicker'
 import ReportPicker from '../components/ReportPicker'
@@ -1610,6 +1611,9 @@ export default function AdminWorkers() {
             </ul>
           ))}
       </Card>
+
+      {/* ---------- Obaveštenja: poruka, slika, dnevnica, slavlje ---------- */}
+      <AnnouncementAdmin people={people} />
 
       {/* Šta ulazi u preuzet obračun */}
       <ReportPicker
