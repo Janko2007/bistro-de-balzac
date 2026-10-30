@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { usePersistentState } from '../lib/persist'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast, useToastOffset } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { categoryComparator, loadCategories } from '../lib/categories'
 import { heading, printDocument, statGrid, table, textBlock } from '../lib/print'
+import CompareShifts from '../components/CompareShifts'
 import ReportPicker from '../components/ReportPicker'
 import {
   Badge,
@@ -50,12 +52,14 @@ export default function ReportDetail() {
   const [imageUrls, setImageUrls] = useState([])
   const [lightbox, setLightbox] = useState(null)
   const [working, setWorking] = useState(false)
-  const [openCats, setOpenCats] = useState(() => new Set())
+  const [openCats, setOpenCats] = usePersistentState(`reportdetail.openCats.${id}`, () => new Set())
   const [returnOpen, setReturnOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
   const [adminNote, setAdminNote] = useState('')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [staffOpen, setStaffOpen] = useState(false)
+  const [compareOpen, setCompareOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const [staffToRemove, setStaffToRemove] = useState(null) // radnik kome se traži potvrda uklanjanja
   const [allWorkers, setAllWorkers] = useState([])
   const [staffDraft, setStaffDraft] = useState([])
@@ -65,7 +69,10 @@ export default function ReportDetail() {
   const [wageEdit, setWageEdit] = useState(null)
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase
+    /* Kolone za proveru stanja postoje tek posle skripte za bazu; bez nje se
+       izveštaj učitava bez njih, pa ostaje upotrebljiv. */
+    const build = (withCheck) =>
+      supabase
       .from('shift_reports')
       .select(
         `
@@ -76,13 +83,18 @@ export default function ReportDetail() {
         staff:shift_report_staff ( wage_override, profile:profiles ( id, full_name, pay_model, daily_wage ) ),
         items:shift_report_items (
           id, item_id, item_name, unit, category,
-          qty_start, qty_added, qty_new, qty_sold, qty_end, is_counter, note
+          qty_start, qty_added, qty_new, qty_sold, qty_end, is_counter, note${withCheck ? ', check_status, check_qty' : ''}
         ),
         images:report_images ( id, storage_path, created_at )
       `,
       )
       .eq('id', id)
       .maybeSingle()
+
+    let { data, error } = await build(true)
+    if (error && /check_(status|qty)/.test(error.message ?? '')) {
+      ;({ data, error } = await build(false))
+    }
 
     if (error) {
       toast.error(errorMessage(error))
@@ -126,6 +138,14 @@ export default function ReportDetail() {
 
   /* Ceo spisak artikala — da se vidi i ono što radnik nije popisao. */
   const [catalog, setCatalog] = useState([])
+
+  // Dok smena traje, onaj ko je samo gleda vidi izmene kolega bez osvežavanja.
+  const openForViewer = !isAdmin && report?.status === 'otvoren'
+  useEffect(() => {
+    if (!openForViewer) return undefined
+    const timer = setInterval(load, 10000)
+    return () => clearInterval(timer)
+  }, [openForViewer, load])
 
   useEffect(() => {
     setLoading(true)
@@ -214,6 +234,12 @@ export default function ReportDetail() {
   const [itemFilter, setItemFilter] = useState('sve') // 'sve' | 'nepopisano' | 'nije'
 
   // Nije prodat = popisan (ima krajnje stanje), a prodato je tačno 0.
+  /* Artikli kod kojih je admin označio da se stanje ne poklapa. */
+  const mismatches = useMemo(
+    () => allRows.filter((i) => i.check_status === 'fali'),
+    [allRows],
+  )
+
   const isUnsold = (i) => !i.missing && Number(i.qty_sold) === 0
 
   const itemCounts = useMemo(
@@ -285,6 +311,24 @@ export default function ReportDetail() {
     setWageEdit(null)
     toast.success(override === null ? 'Vraćena puna dnevnica.' : 'Dnevnica je umanjena za ovaj dan.')
     load()
+  }
+
+  /**
+   * Admin proverava stanje artikla: ✓ (tačno) ili ✗ (ne poklapa se), uz tačan
+   * broj. Ponovni klik na isto skida oznaku. Radnik vidi samo ishod.
+   */
+  async function setCheck(item, status, qty = null) {
+    if (!item.id) return
+    const payload = { check_status: status, check_qty: status === 'fali' ? qty : null }
+    const { error } = await supabase.from('shift_report_items').update(payload).eq('id', item.id)
+    if (error) {
+      toast.error(errorMessage(error))
+      return
+    }
+    setReport((r) => ({
+      ...r,
+      items: (r.items ?? []).map((i) => (i.id === item.id ? { ...i, ...payload } : i)),
+    }))
   }
 
   /** Skida jednog radnika iz smene; obračun se preračunava sam. */
@@ -730,6 +774,28 @@ export default function ReportDetail() {
           )}
         </div>
 
+        {/* Dodatna polja koja je admin postavio (Artikli → Izgled smene). */}
+        {Object.keys(report.extras ?? {}).length > 0 && !lockedForWorker && (
+          <div className="border-t border-stone-200 px-4 py-3">
+            <p className="eyebrow">Dodatno</p>
+            <dl className="mt-1.5 space-y-1">
+              {Object.entries(report.extras).map(([id, e]) => (
+                <div key={id} className="flex items-baseline justify-between gap-3 text-sm">
+                  <dt className="text-stone-500">{e.label}</dt>
+                  <dd className="text-right font-semibold tabular-nums text-stone-900">
+                    {e.type === 'da_ne'
+                      ? e.value === true
+                        ? 'Da'
+                        : 'Ne'
+                      : e.type === 'novac'
+                        ? formatMoney(Number(String(e.value).replace(',', '.')) || 0, false)
+                        : String(e.value)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
         {report.note && !lockedForWorker && (
           <div className="border-t border-stone-200 px-4 py-3">
             <p className="eyebrow">
@@ -882,6 +948,23 @@ export default function ReportDetail() {
           </p>
         ) : (
           <div className="divide-y divide-stone-100">
+            {mismatches.length > 0 && (
+              <div className="bg-rose-50 px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-rose-700">
+                  Stanje se ne poklapa
+                </p>
+                <ul className="mt-1.5 space-y-0.5 text-sm text-rose-900">
+                  {mismatches.map((i) => (
+                    <li key={i.key}>
+                      <b>{i.item_name}</b> · upisano {formatQty(i.qty_end)}
+                      {i.check_qty !== null && i.check_qty !== undefined
+                        ? `, tačno ${formatQty(i.check_qty)}`
+                        : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {visibleGroups.map(([category, catItems]) => {
               // U filtriranom prikazu kategorije su odmah otvorene — da se vidi šta je izdvojeno.
               const open = itemFilter !== 'sve' || openCats.has(category)
@@ -910,7 +993,7 @@ export default function ReportDetail() {
 
                   {open && (
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[500px] border-collapse text-sm">
+                      <table className="w-full min-w-[560px] border-collapse text-sm">
                         <thead>
                           <tr className="border-b border-stone-100 text-[10px] font-bold uppercase tracking-wide text-stone-400">
                             <th className="px-4 py-2 text-left">Artikal</th>
@@ -918,7 +1001,8 @@ export default function ReportDetail() {
                             <th className="px-2 py-2 text-right">Dodato</th>
                             <th className="px-2 py-2 text-right">Novo</th>
                             <th className="px-2 py-2 text-right">Prodato</th>
-                            <th className="px-4 py-2 text-right">Krajnje</th>
+                            <th className="px-2 py-2 text-right">Krajnje</th>
+                            <th className="px-4 py-2 text-right">Provera</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -964,8 +1048,83 @@ export default function ReportDetail() {
                               >
                                 {formatQty(item.qty_sold)}
                               </td>
-                              <td className="px-4 py-2 text-right font-semibold tabular-nums text-stone-700">
+                              <td className="px-2 py-2 text-right font-semibold tabular-nums text-stone-700">
                                 {formatQty(item.qty_end)}
+                              </td>
+                              <td className="px-4 py-2">
+                                {item.id && isAdmin ? (
+                                  <div className="flex items-center justify-end gap-1">
+                                    {item.check_status === 'fali' && (
+                                      <input
+                                        key={`${item.key}-${item.check_qty}`}
+                                        type="number"
+                                        inputMode="decimal"
+                                        step="0.01"
+                                        min="0"
+                                        placeholder="tačno"
+                                        aria-label={`${item.item_name} — tačno stanje`}
+                                        defaultValue={item.check_qty ?? ''}
+                                        onBlur={(e) =>
+                                          setCheck(
+                                            item,
+                                            'fali',
+                                            e.target.value === '' ? null : Number(e.target.value),
+                                          )
+                                        }
+                                        className="w-[72px] rounded-lg border border-rose-300 bg-white px-1.5 py-1 text-center text-sm font-bold tabular-nums outline-none focus:ring-2 focus:ring-rose-500/30"
+                                      />
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCheck(item, item.check_status === 'ok' ? null : 'ok')
+                                      }
+                                      aria-pressed={item.check_status === 'ok'}
+                                      aria-label={`${item.item_name} — stanje tačno`}
+                                      className={cx(
+                                        'h-7 w-7 rounded-lg text-sm font-bold transition',
+                                        item.check_status === 'ok'
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-stone-100 text-stone-400 hover:bg-emerald-50 hover:text-emerald-700',
+                                      )}
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCheck(
+                                          item,
+                                          item.check_status === 'fali' ? null : 'fali',
+                                          item.check_qty ?? null,
+                                        )
+                                      }
+                                      aria-pressed={item.check_status === 'fali'}
+                                      aria-label={`${item.item_name} — stanje se ne poklapa`}
+                                      className={cx(
+                                        'h-7 w-7 rounded-lg text-sm font-bold transition',
+                                        item.check_status === 'fali'
+                                          ? 'bg-rose-600 text-white'
+                                          : 'bg-stone-100 text-stone-400 hover:bg-rose-50 hover:text-rose-700',
+                                      )}
+                                    >
+                                      ✗
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="text-right text-xs font-bold">
+                                    {item.check_status === 'ok' && (
+                                      <span className="text-emerald-700">✓</span>
+                                    )}
+                                    {item.check_status === 'fali' && (
+                                      <span className="text-rose-600">
+                                        ✗{item.check_qty !== null && item.check_qty !== undefined
+                                          ? ` ${formatQty(item.check_qty)}`
+                                          : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -988,12 +1147,11 @@ export default function ReportDetail() {
           `safe-area-inset-bottom` traka bi upala pod nju. Na računaru nema
           navigacije, pa ide na dno, sa malo vazduha ispod dugmadi. */}
       {isAdmin && (
-        <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
+        <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-2 backdrop-blur lg:bottom-0 lg:py-3 lg:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
+          <div className="relative mx-auto flex max-w-6xl items-center gap-2">
             {report.status !== 'potvrdjen' ? (
               <Button
                 variant="success"
-                size="lg"
                 loading={working}
                 onClick={() => changeStatus('potvrdjen')}
                 className="flex-1 sm:flex-none"
@@ -1003,7 +1161,6 @@ export default function ReportDetail() {
             ) : (
               <Button
                 variant="secondary"
-                size="lg"
                 loading={working}
                 onClick={() => changeStatus('poslat')}
                 className="flex-1 sm:flex-none"
@@ -1016,31 +1173,55 @@ export default function ReportDetail() {
                 pa mu se ne računa dnevnica. */}
             <Button
               variant="secondary"
-              size="lg"
               onClick={() => navigate(`/novi-popis?izvestaj=${report.id}`)}
               disabled={working}
             >
-              ✏️ Uredi popis
+              ✏️ Uredi
             </Button>
 
             <Button
               variant="secondary"
-              size="lg"
-              onClick={() => setReturnOpen(true)}
+              aria-label="Više opcija"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen((v) => !v)}
               disabled={working}
             >
-              ↩︎ Vrati na ispravku
+              •••
             </Button>
 
-            <Button
-              variant="ghost"
-              size="lg"
-              className="ml-auto text-rose-600"
-              onClick={() => setDeleteOpen(true)}
-              disabled={working}
-            >
-              Obriši
-            </Button>
+            {moreOpen && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Zatvori"
+                  className="fixed inset-0 z-10 cursor-default"
+                  onClick={() => setMoreOpen(false)}
+                />
+                <div className="absolute bottom-full right-0 z-20 mb-2 w-56 overflow-hidden rounded-2xl bg-white py-1 shadow-lg ring-1 ring-stone-200">
+                  <button
+                    type="button"
+                    className="block w-full px-4 py-3 text-left text-sm font-semibold text-stone-800 hover:bg-stone-50"
+                    onClick={() => { setMoreOpen(false); setCompareOpen(true) }}
+                  >
+                    ⇄ Uporedi smene
+                  </button>
+                  <button
+                    type="button"
+                    className="block w-full px-4 py-3 text-left text-sm font-semibold text-stone-800 hover:bg-stone-50"
+                    onClick={() => { setMoreOpen(false); setReturnOpen(true) }}
+                  >
+                    ↩︎ Vrati na ispravku
+                  </button>
+                  <button
+                    type="button"
+                    className="block w-full border-t border-stone-100 px-4 py-3 text-left text-sm font-semibold text-rose-600 hover:bg-rose-50"
+                    onClick={() => { setMoreOpen(false); setDeleteOpen(true) }}
+                  >
+                    Obriši
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1050,6 +1231,9 @@ export default function ReportDetail() {
           Admin je vratio ovaj popis na ispravku. Pošalji novi, ispravan popis za ovu smenu.
         </div>
       )}
+
+      {/* ---------- Poređenje sa drugom smenom ---------- */}
+      {compareOpen && <CompareShifts report={report} onClose={() => setCompareOpen(false)} />}
 
       {/* ---------- Modali ---------- */}
       <ReportPicker

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
@@ -30,12 +31,12 @@ const monthOf = (iso) => String(iso).slice(0, 7)
 export default function ItemSalesReport({ items, categories }) {
   const toast = useToast()
 
-  const [month, setMonth] = useState(() => monthOf(todayISO()))
+  const [month, setMonth] = usePersistentState('sales.month', () => monthOf(todayISO()))
   const [sales, setSales] = useState(null) // null = učitava se
   const [shiftCount, setShiftCount] = useState(0)
-  const [open, setOpen] = useState(false) // cela kartica zatvorena dok se ne klikne
-  const [view, setView] = useState('kategorije') // 'kategorije' | 'najprodavanije'
-  const [openCats, setOpenCats] = useState(() => new Set())
+  const [open, setOpen] = usePersistentState('sales.open', false) // cela kartica zatvorena dok se ne klikne
+  const [view, setView] = usePersistentState('sales.view', 'kategorije') // 'kategorije' | 'najprodavanije'
+  const [openCats, setOpenCats] = usePersistentState('sales.openCats', () => new Set())
   const [pickerOpen, setPickerOpen] = useState(false)
 
   useEffect(() => {

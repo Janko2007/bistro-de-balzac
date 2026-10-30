@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 
 import { useToast } from '../context/ToastContext'
 import { avatarUrl, removeAvatar, uploadAvatar } from '../lib/avatars'
+import AvatarCropper from './AvatarCropper'
 import { cx, errorMessage, initials } from '../lib/utils'
 import { Button } from './ui'
 
@@ -113,18 +114,25 @@ export function AvatarEditor({ person, className, onChange, children }) {
   const toast = useToast()
   const input = useRef(null)
   const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState(null) // fotografija koja se namešta
 
   const choose = () => input.current?.click()
 
-  async function pick(e) {
+  // Izabrana fotografija prvo ide na nameštanje (pomeranje i zumiranje).
+  function pick(e) {
     const file = e.target.files?.[0]
     e.target.value = '' // da ista slika može ponovo da se izabere
     if (!file) return
+    if (!file.type?.startsWith('image/')) return toast.error('Izaberi sliku (JPG ili PNG).')
+    setPending(file)
+  }
 
+  async function saveCropped(cropped) {
     setBusy(true)
     try {
-      const path = await uploadAvatar(person, file)
+      const path = await uploadAvatar(person, cropped, { cropped: true })
       toast.success('Slika je sačuvana.')
+      setPending(null)
       onChange?.(path)
     } catch (err) {
       console.error(err)
@@ -176,6 +184,7 @@ export function AvatarEditor({ person, className, onChange, children }) {
       </div>
 
       <input ref={input} type="file" accept="image/*" className="hidden" onChange={pick} />
+      <AvatarCropper file={pending} onCancel={() => setPending(null)} onDone={saveCropped} />
     </div>
   )
 }

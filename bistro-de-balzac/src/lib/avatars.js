@@ -45,10 +45,11 @@ export function avatarUrl(path) {
  * Postavlja novu sliku: iseče je na kvadrat, pošalje u storage, upiše putanju
  * u profil i obriše staru. Vraća novu putanju.
  */
-export async function uploadAvatar(person, file) {
+export async function uploadAvatar(person, file, { cropped = false } = {}) {
   if (!file?.type?.startsWith('image/')) throw new Error('Izaberi sliku (JPG ili PNG).')
 
-  const image = await squareAvatar(file)
+  // Slika koju je radnik sam namestio već je kvadrat; inače se seče iz sredine.
+  const image = cropped ? file : await squareAvatar(file)
   const path = `${person.id}/${Date.now()}.jpg`
 
   const { error: upErr } = await supabase.storage

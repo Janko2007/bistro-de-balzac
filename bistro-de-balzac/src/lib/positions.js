@@ -46,6 +46,24 @@ export function parsePositions(text) {
     .filter(Boolean)
 }
 
+/**
+ * Da li je neko na obuci. Kod njih admin bira da li samo gledaju smenu ili
+ * mogu i da je menjaju (`training_access`: 'gleda' | 'uredjuje').
+ */
+export function isTrainee(position) {
+  return /obuk/i.test(String(position ?? ''))
+}
+
+/** Radnik na obuci kome je dozvoljeno samo gledanje (admin to nikad nije). */
+export function isViewOnly(profile) {
+  return (
+    !!profile &&
+    profile.role !== 'admin' &&
+    isTrainee(profile.position) &&
+    profile.training_access !== 'uredjuje'
+  )
+}
+
 /** ['Konobar', 'Šanker'] → „Konobar, Šanker“ */
 export function joinPositions(list) {
   return (list ?? []).map((s) => String(s).trim()).filter(Boolean).join(', ')

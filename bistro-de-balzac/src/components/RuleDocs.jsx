@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
@@ -18,7 +19,7 @@ export default function RuleDocs({ editable = false }) {
 
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [open, setOpen] = useState(() => new Set())
+  const [open, setOpen] = usePersistentState('rules.open', () => new Set())
 
   const [edit, setEdit] = useState(null) // { id?, title, body }
   const [removing, setRemoving] = useState(null) // dokument koji se briše

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
@@ -20,8 +21,8 @@ export default function BadgeInfo({ bare = false }) {
   const toast = useToast()
 
   const [loading, setLoading] = useState(true)
-  const [open, setOpen] = useState(false)
-  const [openWinners, setOpenWinners] = useState(false)
+  const [open, setOpen] = usePersistentState('badgeinfo.open', false)
+  const [openWinners, setOpenWinners] = usePersistentState('badgeinfo.openWinners', false)
   const [badges, setBadges] = useState([])
   const [winners, setWinners] = useState([])
   const [names, setNames] = useState(new Map())

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { categoryComparator, hiddenCategoryNames, loadCategories } from '../lib/categories'
 import CategoryManager from '../components/CategoryManager'
+import InventoryManager from '../components/InventoryManager'
 import ItemSalesReport from '../components/ItemSalesReport'
 import { blankFields, heading, printDocument, table } from '../lib/print'
 import ReportPicker from '../components/ReportPicker'
@@ -46,18 +48,19 @@ const modeOf = (item) =>
 
 const MODE_LABEL = { brojac: 'brojač', krajnje: 'krajnje stanje' }
 
-export default function AdminItems() {
+export default function AdminItems({ embedded = false }) {
   const toast = useToast()
 
   const [loading, setLoading] = useState(true)
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([])
   const [catManagerOpen, setCatManagerOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const [showInactive, setShowInactive] = useState(false)
+  const [inventoryOpen, setInventoryOpen] = useState(false)
+  const [search, setSearch] = usePersistentState('items.search', '')
+  const [showInactive, setShowInactive] = usePersistentState('items.showInactive', false)
   // Kartica „Artikli“ je zatvorena dok se ne klikne na naslov.
-  const [listOpen, setListOpen] = useState(false)
-  const [openCats, setOpenCats] = useState(() => new Set())
+  const [listOpen, setListOpen] = usePersistentState('items.listOpen', false)
+  const [openCats, setOpenCats] = usePersistentState('items.openCats', () => new Set())
 
   const [pickerOpen, setPickerOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
@@ -291,13 +294,21 @@ export default function AdminItems() {
     load()
   }
 
-  if (loading) return <FullPageLoader />
+  if (loading) return embedded ? <p className="py-6 text-center text-sm text-stone-400">Učitavam…</p> : <FullPageLoader />
 
   return (
     <div className="space-y-4">
       <CategoryManager
         open={catManagerOpen}
         onClose={() => setCatManagerOpen(false)}
+        categories={categories}
+        items={items}
+        onChanged={load}
+      />
+
+      <InventoryManager
+        open={inventoryOpen}
+        onClose={() => setInventoryOpen(false)}
         categories={categories}
         items={items}
         onChanged={load}
@@ -358,6 +369,9 @@ export default function AdminItems() {
           </Button>
           <Button variant="secondary" size="sm" onClick={() => setCatManagerOpen(true)}>
             Kategorije
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setInventoryOpen(true)}>
+            Popisi
           </Button>
           <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
             Preuzmi popis

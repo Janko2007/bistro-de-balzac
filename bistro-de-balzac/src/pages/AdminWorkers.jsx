@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -11,8 +12,9 @@ import {
   monthLabel,
   saveWorkerBadges,
 } from '../lib/badges'
-import { addPosition, joinPositions, loadPositions, parsePositions } from '../lib/positions'
+import { addPosition, isTrainee, joinPositions, loadPositions, parsePositions } from '../lib/positions'
 import { currentPeriod, periodLabel } from '../lib/payperiod'
+import AnnouncementAdmin from '../components/AnnouncementAdmin'
 import Avatar, { AvatarEditor } from '../components/Avatar'
 import PeriodPicker from '../components/PeriodPicker'
 import ReportPicker from '../components/ReportPicker'
@@ -34,6 +36,8 @@ import {
 } from '../components/ui'
 import {
   SHIFT_SHORT,
+  STATUS_LABELS,
+  STATUS_STYLES,
   countLabel,
   cx,
   errorMessage,
@@ -52,6 +56,8 @@ const emptyNew = {
   password: '',
   role: 'radnik',
   position: '',
+  training_access: 'gleda',
+  hidden_from_team: false,
   pay_model: 'dnevnica',
   daily_wage: '',
   monthly_salary: '',
@@ -140,6 +146,69 @@ function PayFields({ form, setForm }) {
  * Spisak dopunjuješ dugmetom „+ Novo“. Vidi se na spisku radnika i na
  * ekranu „Tim“, koji gledaju i radnici.
  */
+/** Sakriva radnika od ostalih radnika (ne vide ga u Timu). Admin ga i dalje vidi. */
+function HiddenField({ form, setForm }) {
+  const on = form.hidden_from_team === true
+  return (
+    <button
+      type="button"
+      onClick={() => setForm((f) => ({ ...f, hidden_from_team: !on }))}
+      aria-pressed={on}
+      className="flex w-full items-center gap-3 rounded-2xl bg-stone-100 px-3.5 py-3 text-left"
+    >
+      <span
+        className={cx(
+          'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold',
+          on ? 'bg-brand-600 text-white' : 'bg-white text-transparent ring-1 ring-inset ring-stone-300',
+        )}
+        aria-hidden="true"
+      >
+        ✓
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-stone-800">Sakrij od ostalih radnika</span>
+        <span className="block text-[11px] text-stone-500">Ne vide ga u Timu. Ti ga i dalje vidiš.</span>
+      </span>
+    </button>
+  )
+}
+/** Obuka: da li radnik samo gleda smenu ili može i da je menja. */
+function TrainingAccessField({ form, setForm }) {
+  const options = [
+    { value: 'gleda', label: 'Samo gleda', hint: 'Vidi popis, ništa ne menja.' },
+    { value: 'uredjuje', label: 'Može da menja', hint: 'Radi popis kao običan radnik.' },
+  ]
+  return (
+    <Field label="Obuka — šta sme u smeni">
+      <div className="grid grid-cols-2 gap-1.5">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => setForm((f) => ({ ...f, training_access: o.value }))}
+            aria-pressed={form.training_access === o.value}
+            className={cx(
+              'rounded-2xl px-3 py-2.5 text-left transition',
+              form.training_access === o.value
+                ? 'bg-ink text-white'
+                : 'bg-stone-100 text-stone-700 hover:bg-stone-200/70',
+            )}
+          >
+            <span className="block text-[13px] font-bold">{o.label}</span>
+            <span
+              className={cx(
+                'block text-[11px]',
+                form.training_access === o.value ? 'text-stone-300' : 'text-stone-500',
+              )}
+            >
+              {o.hint}
+            </span>
+          </button>
+        ))}
+      </div>
+    </Field>
+  )
+}
 function PositionField({ form, setForm, positions, onAdded }) {
   const toast = useToast()
   const [adding, setAdding] = useState(false)
@@ -254,7 +323,7 @@ export default function AdminWorkers() {
   const [loading, setLoading] = useState(true)
   const [people, setPeople] = useState([])
   const [stats, setStats] = useState(new Map())
-  const [period, setPeriod] = useState(() => currentPeriod())
+  const [period, setPeriod] = usePersistentState('workers.period', () => currentPeriod())
 
   const [working, setWorking] = useState(false)
   const [modal, setModal] = useState(null) // { kind, person? }
@@ -263,7 +332,8 @@ export default function AdminWorkers() {
   const [fnHelp, setFnHelp] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [payoutToRemove, setPayoutToRemove] = useState(null) // id stavke koja se briše
-  const [showInactive, setShowInactive] = useState(false)
+  const [showInactive, setShowInactive] = usePersistentState('workers.showInactive', false)
+  const [showAllWorkers, setShowAllWorkers] = usePersistentState('workers.showAllWorkers', false)
   // { reportId, value } — smena kojoj se upravo menja iznos dnevnice
   const [wageRow, setWageRow] = useState(null)
 
@@ -273,7 +343,7 @@ export default function AdminWorkers() {
   const [positions, setPositions] = useState([])
   // Radno iskustvo koje su radnici sami upisali — vidi ga samo admin.
   const [details, setDetails] = useState(new Map())
-  const [openExp, setOpenExp] = useState(() => new Set()) // radnici kojima je iskustvo otvoreno
+  const [openExp, setOpenExp] = usePersistentState('workers.openExp', () => new Set()) // radnici kojima je iskustvo otvoreno
   const [badgesOpen, setBadgesOpen] = useState(false)
   const [picked, setPicked] = useState(new Set()) // u prozoru za dodelu
   const [badgeForm, setBadgeForm] = useState(null) // { id?, name, icon, description }
@@ -601,6 +671,8 @@ export default function AdminWorkers() {
       password: '',
       role: person.role,
       position: person.position ?? '',
+      training_access: person.training_access === 'uredjuje' ? 'uredjuje' : 'gleda',
+      hidden_from_team: person.hidden_from_team === true,
       pay_model: person.pay_model === 'plata' ? 'plata' : 'dnevnica',
       daily_wage: String(person.daily_wage ?? ''),
       monthly_salary: String(person.monthly_salary ?? ''),
@@ -636,7 +708,11 @@ export default function AdminWorkers() {
     // sme da menja profil direktno.
     const position = form.position.trim()
     if (position && data?.user?.id) {
-      await supabase.from('profiles').update({ position }).eq('id', data.user.id)
+      const extra = isTrainee(position) ? { training_access: form.training_access } : {}
+      await supabase.from('profiles').update({ position, ...extra }).eq('id', data.user.id)
+    }
+    if (form.hidden_from_team && data?.user?.id) {
+      await supabase.from('profiles').update({ hidden_from_team: true }).eq('id', data.user.id)
     }
 
     setCreated({ username: name, password: form.password })
@@ -659,6 +735,12 @@ export default function AdminWorkers() {
       daily_wage: parseNumber(form.daily_wage),
       monthly_salary: parseNumber(form.monthly_salary),
       percent: parseNumber(form.percent),
+    }
+    // Dozvola za obuku se upisuje samo onome ko je na obuci (skripta -23).
+    if (isTrainee(form.position)) payload.training_access = form.training_access
+    // Sakrivanje se upisuje samo kad je menjano (skripta -24).
+    if (form.hidden_from_team !== (person.hidden_from_team === true)) {
+      payload.hidden_from_team = form.hidden_from_team
     }
     // Adresa naloga se NE menja: Supabase prijava ostaje na staroj, a radnik
     // se prijavljuje novim imenom jer aplikacija mejl traži po imenu.
@@ -1016,7 +1098,12 @@ export default function AdminWorkers() {
   const workerRow = ({ person, calc }, index = 0) => (
     <div
       key={person.id}
-      className={cx('px-4 py-3 lg:py-2.5', !person.is_active && 'opacity-60')}
+      className={cx(
+        'px-4 py-3 lg:border-b lg:border-stone-100 lg:[&:nth-child(odd)]:border-r',
+        !person.is_active && 'opacity-60',
+        // Telefon prikazuje prva tri radnika, računar prva četiri.
+        person.is_active && index === 3 && !showAllWorkers && 'hidden lg:block',
+      )}
     >
       <div className="flex items-start gap-3">
         {/* Redosled zadaje admin — najvažniji radnici na vrh. */}
@@ -1065,6 +1152,14 @@ export default function AdminWorkers() {
             )}
             {person.id === profile.id && (
               <Badge className="bg-sky-100 text-sky-700 ring-sky-600/20">ti</Badge>
+            )}
+            {isTrainee(person.position) && (
+              <Badge className="bg-violet-100 text-violet-700 ring-violet-600/20">
+                obuka · {person.training_access === 'uredjuje' ? 'menja' : 'gleda'}
+              </Badge>
+            )}
+            {person.hidden_from_team === true && (
+              <Badge className="bg-stone-200 text-stone-600 ring-stone-400/30">skriven</Badge>
             )}
           </div>
           {/* Kratko: radno mesto i dnevnica. Telefon i ostalo je u „Izmeni“. */}
@@ -1127,11 +1222,27 @@ export default function AdminWorkers() {
 
       {/* Obračun i dugmad. Na telefonu jedno ispod drugog, a na širem ekranu
           u istom redu — tako spisak od 13 radnika stane bez skrolovanja. */}
-      <div className="mt-2 flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
+      <div className="mt-2 flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:gap-3">
       {/* Jedan red: broj dana (klikom se otvaraju dani, gde se pojedinom danu
           umanjuje iznos) i iznos za isplatu. Isplaćeno, bonus i procenat su u
           prozoru „Isplati“. Minus se ne piše — pretplata se kaže rečju. */}
-      <div className="flex items-center gap-3 lg:flex-1">
+      <div className="flex items-center gap-3 2xl:flex-1">
+        <span
+          className={cx(
+            'rounded-full px-3 py-1.5 text-sm font-bold tabular-nums',
+            calc.balance > 0
+              ? 'bg-brand-600 text-white'
+              : calc.balance < 0
+                ? 'bg-rose-600 text-white'
+                : 'bg-stone-100 text-stone-500',
+          )}
+        >
+          {formatMoney(Math.abs(calc.balance), false)}
+          {calc.balance < 0 && (
+            <span className="ml-1 text-[11px] font-semibold opacity-80">pretplaćeno</span>
+          )}
+        </span>
+
         {calc.model === 'dnevnica' && calc.days > 0 ? (
           <button
             type="button"
@@ -1145,42 +1256,25 @@ export default function AdminWorkers() {
             {calc.days} {plural(calc.days, 'dan')}
           </button>
         ) : (
-          <span className="text-sm font-semibold tabular-nums text-stone-700">
-            {calc.model === 'plata' ? 'plata' : `${calc.days} ${plural(calc.days, 'dan')}`}
-          </span>
+          calc.model === 'dnevnica' && (
+            <span className="text-sm font-semibold tabular-nums text-stone-400">
+              {calc.days} {plural(calc.days, 'dan')}
+            </span>
+          )
         )}
-        <span className="text-sm tabular-nums text-stone-400">
-          {formatMoney(calc.earned, false)}
-        </span>
-
-        <span
-          className={cx(
-            'ml-auto rounded-full px-3 py-1.5 text-sm font-bold tabular-nums',
-            calc.balance > 0
-              ? 'bg-brand-600 text-white'
-              : calc.balance < 0
-                ? 'bg-rose-600 text-white'
-                : 'bg-stone-100 text-stone-500',
-          )}
-        >
-          {formatMoney(Math.abs(calc.balance), false)}
-          {calc.balance < 0 && (
-            <span className="ml-1 text-[11px] font-semibold opacity-80">pretplaćeno</span>
-          )}
-        </span>
       </div>
 
       {/* Na telefonu sva dugmad stoje u JEDNOM redu ispod obračuna — svako
           zauzima isti deo širine, pa ništa ne pada u novi red. */}
       <div
         className={cx(
-          'grid auto-cols-fr grid-flow-col gap-1.5 lg:flex lg:shrink-0 lg:items-center',
+          'grid auto-cols-fr grid-flow-col gap-1.5 2xl:flex 2xl:shrink-0 2xl:items-center',
         )}
       >
         <Button
           variant="secondary"
           size="sm"
-          className="w-full px-1.5 lg:w-auto lg:px-3"
+          className="w-full px-1.5 2xl:w-auto 2xl:px-3"
           onClick={() => {
             setForm({
               payout: calc.balance > 0 ? String(calc.balance) : '',
@@ -1196,7 +1290,7 @@ export default function AdminWorkers() {
         <Button
           variant="ghost"
           size="sm"
-          className="w-full px-1.5 lg:w-auto lg:px-3"
+          className="w-full px-1.5 2xl:w-auto 2xl:px-3"
           onClick={() => {
             setForm({ payout: '', paid_on: todayISO(), payout_note: '' })
             setPayoutToRemove(null)
@@ -1210,7 +1304,7 @@ export default function AdminWorkers() {
           <Button
             variant="ghost"
             size="sm"
-            className="w-full px-1.5 lg:w-auto lg:px-3"
+            className="w-full px-1.5 2xl:w-auto 2xl:px-3"
             onClick={() => openBadges(person)}
           >
             Bedževi
@@ -1219,7 +1313,7 @@ export default function AdminWorkers() {
         <Button
           variant="ghost"
           size="sm"
-          className="w-full px-1.5 lg:w-auto lg:px-3"
+          className="w-full px-1.5 2xl:w-auto 2xl:px-3"
           onClick={() => openEdit(person)}
         >
           Izmeni
@@ -1229,7 +1323,7 @@ export default function AdminWorkers() {
           <Button
             variant="ghost"
             size="sm"
-            className="w-full px-1.5 text-rose-600 lg:w-auto lg:px-3"
+            className="w-full px-1.5 text-rose-600 2xl:w-auto 2xl:px-3"
             onClick={() => setModal({ kind: 'delete', person, calc })}
           >
             Obriši
@@ -1290,7 +1384,24 @@ export default function AdminWorkers() {
           }
         />
 
-        <div className="divide-y divide-stone-100">{activeRows.map(workerRow)}</div>
+        <div className="divide-y divide-stone-100 lg:grid lg:grid-cols-2 lg:divide-y-0">
+          {(showAllWorkers ? activeRows : activeRows.slice(0, 4)).map(workerRow)}
+        </div>
+
+        {activeRows.length > 3 && (
+          <button
+            type="button"
+            onClick={() => setShowAllWorkers((v) => !v)}
+            aria-expanded={showAllWorkers}
+            className={cx(
+              'w-full border-t border-stone-100 px-4 py-3 text-center text-sm font-bold text-stone-600 transition hover:bg-stone-50',
+              // Na računaru se prikazuju četiri, pa dugme treba samo kad ih ima više.
+              activeRows.length <= 4 && 'lg:hidden',
+            )}
+          >
+            {showAllWorkers ? 'Prikaži manje' : `Prikaži sve (${activeRows.length})`}
+          </button>
+        )}
 
         {/* Neaktivni stoje sklonjeni na dno — otvaraju se klikom. */}
         {inactiveRows.length > 0 && (
@@ -1326,7 +1437,7 @@ export default function AdminWorkers() {
             </button>
 
             {showInactive && (
-              <div className="divide-y divide-stone-100 border-t border-stone-100 bg-stone-50/40">
+              <div className="divide-y divide-stone-100 border-t border-stone-100 bg-stone-50/40 lg:grid lg:grid-cols-2 lg:divide-y-0">
                 {inactiveRows.map(workerRow)}
               </div>
             )}
@@ -1611,6 +1722,9 @@ export default function AdminWorkers() {
           ))}
       </Card>
 
+      {/* ---------- Obaveštenja: poruka, slika, dnevnica, slavlje ---------- */}
+      <AnnouncementAdmin people={people} />
+
       {/* Šta ulazi u preuzet obračun */}
       <ReportPicker
         open={pickerOpen}
@@ -1626,6 +1740,7 @@ export default function AdminWorkers() {
 
       {/* ---------- Pravila i obaveze — radnici ih čitaju na ekranu Profil ---------- */}
       <RuleDocs editable />
+
 
       {/* ================================================================ */}
       {/*  Modal: novi nalog                                               */}
@@ -1700,6 +1815,10 @@ export default function AdminWorkers() {
               positions={positions}
               onAdded={async () => setPositions(await loadPositions())}
             />
+
+            {isTrainee(form.position) && <TrainingAccessField form={form} setForm={setForm} />}
+
+            <HiddenField form={form} setForm={setForm} />
 
             <PayFields form={form} setForm={setForm} />
 
@@ -1795,6 +1914,10 @@ export default function AdminWorkers() {
                 positions={positions}
                 onAdded={async () => setPositions(await loadPositions())}
               />
+
+              {isTrainee(form.position) && <TrainingAccessField form={form} setForm={setForm} />}
+
+            <HiddenField form={form} setForm={setForm} />
 
               <PayFields form={form} setForm={setForm} />
 
@@ -1955,7 +2078,16 @@ export default function AdminWorkers() {
             if (!byDay.has(s.report_date)) byDay.set(s.report_date, [])
             byDay.get(s.report_date).push(s)
           }
-          const days = [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0]))
+          // Vraćene i otvorene smene se vide, ali ne ulaze u zbir.
+          const otherByDay = new Map()
+          for (const s of fresh.otherList ?? []) {
+            if (!otherByDay.has(s.report_date)) otherByDay.set(s.report_date, [])
+            otherByDay.get(s.report_date).push(s)
+          }
+          const allDates = new Set([...byDay.keys(), ...otherByDay.keys()])
+          const days = [...allDates]
+            .sort((a, b) => b.localeCompare(a))
+            .map((d) => [d, byDay.get(d) ?? [], otherByDay.get(d) ?? []])
 
           return (
             <div className="space-y-3">
@@ -1967,8 +2099,12 @@ export default function AdminWorkers() {
               </div>
 
               <ul className="divide-y divide-stone-100">
-                {days.map(([date, list]) => {
+                {days.map(([date, list, others]) => {
                   const sorted = [...list].sort((a, b) => shiftRank(a.shift) - shiftRank(b.shift))
+                  const shown = [...list, ...others].sort(
+                    (a, b) => shiftRank(a.shift) - shiftRank(b.shift),
+                  )
+                  const counted = sorted.length > 0
                   /* Dan nosi jednu dnevnicu — ako je na nekoj smeni upisan
                      manji iznos, važi najmanji. */
                   const overrides = sorted
@@ -1979,7 +2115,7 @@ export default function AdminWorkers() {
                   const cut = overrides.length > 0
                   // Iznos se upisuje na prvu smenu tog dana.
                   const target = sorted[0]
-                  const editing = wageRow?.reportId === target.id
+                  const editing = counted && wageRow?.reportId === target.id
 
                   return (
                     <li key={date} className="py-2">
@@ -1988,12 +2124,28 @@ export default function AdminWorkers() {
                           <span className="block text-sm font-semibold text-stone-900">
                             {formatDate(date)}
                           </span>
-                          <span className="block text-[11px] text-stone-400">
-                            {sorted.map((s) => SHIFT_SHORT[s.shift] ?? s.shift).join(' · ')}
+                          <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-stone-400">
+                            {shown.map((s) => (
+                              <span key={s.id} className="inline-flex items-center gap-1.5">
+                                {SHIFT_SHORT[s.shift] ?? s.shift}
+                                <span
+                                  className={cx(
+                                    'rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset',
+                                    STATUS_STYLES[s.status],
+                                  )}
+                                >
+                                  {STATUS_LABELS[s.status] ?? s.status}
+                                </span>
+                              </span>
+                            ))}
                           </span>
                         </span>
 
-                        {!editing && (
+                        {!counted && (
+                          <span className="shrink-0 text-[13px] text-stone-300">—</span>
+                        )}
+
+                        {counted && !editing && (
                           <>
                             <span className="shrink-0 text-[13px] tabular-nums">
                               {cut ? (

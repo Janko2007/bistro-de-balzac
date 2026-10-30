@@ -68,6 +68,7 @@ export async function loadWorkStats({ from, to, periodKey, profileId = null }) {
         bonus: 0,
         pazar: 0, // zbir pazara smena koje je radio — osnova za procenat
         shiftList: [],
+        otherList: [], // vraćene i otvorene smene — samo za prikaz, ne ulaze u zbir
         payouts: [],
       })
     }
@@ -92,8 +93,10 @@ export async function loadWorkStats({ from, to, periodKey, profileId = null }) {
       entry.shiftList.push({ ...row.report, wage_override: row.wage_override ?? null })
     } else if (status === 'vracen') {
       entry.returned += 1
+      entry.otherList.push({ ...row.report })
     } else {
       entry.open += 1
+      entry.otherList.push({ ...row.report })
     }
   }
 
@@ -123,6 +126,7 @@ export const EMPTY_STATS = {
   bonus: 0,
   pazar: 0,
   shiftList: [],
+  otherList: [],
   payouts: [],
 }
 
@@ -174,6 +178,7 @@ export function settle(profile, stats = EMPTY_STATS) {
     paid: stats.paid,
     balance: round2(earned + stats.bonus - stats.paid),
     shiftList: stats.shiftList,
+    otherList: stats.otherList ?? [],
     payouts: stats.payouts,
     bonuses: stats.payouts.filter((p) => p.kind === 'bonus'),
     payments: stats.payouts.filter((p) => p.kind !== 'bonus'),

@@ -11,13 +11,17 @@ export function AuthProvider({ children }) {
   const mounted = useRef(true)
 
   const fetchProfile = useCallback(async (userId) => {
-    const { data, error } = await supabase
+    const base =
+      'id, email, full_name, phone, role, pay_model, daily_wage, monthly_salary, percent, is_active, is_deleted, avatar_path, created_at'
+    // Radno mesto i dozvola za obuku (skripta -23); bez nje prijava radi kao ranije.
+    let { data, error } = await supabase
       .from('profiles')
-      .select(
-        'id, email, full_name, phone, role, pay_model, daily_wage, monthly_salary, percent, is_active, is_deleted, avatar_path, created_at',
-      )
+      .select(`${base}, position, training_access`)
       .eq('id', userId)
       .maybeSingle()
+    if (error) {
+      ;({ data, error } = await supabase.from('profiles').select(base).eq('id', userId).maybeSingle())
+    }
 
     if (!mounted.current) return null
     if (error) {

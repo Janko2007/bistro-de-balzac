@@ -7,13 +7,12 @@ import { isSupabaseConfigured } from './lib/supabaseClient'
 
 import Login from './pages/Login'
 import NewReport from './pages/NewReport'
-import MyReports from './pages/MyReports'
 import Profile from './pages/Profile'
 import ReportDetail from './pages/ReportDetail'
 import AdminDashboard from './pages/AdminDashboard'
-import AdminItems from './pages/AdminItems'
+import AdminSettings from './pages/AdminSettings'
 import AdminWorkers from './pages/AdminWorkers'
-import AdminDeposits from './pages/AdminDeposits'
+import Schedule from './pages/Schedule'
 
 /** Početna strana zavisi od uloge: admin -> dashboard, radnik -> novi popis. */
 function HomeRoute() {
@@ -59,21 +58,25 @@ export default function App() {
       >
         <Route index element={<HomeRoute />} />
         <Route path="novi-popis" element={<NewReport />} />
-        <Route path="moji-izvestaji" element={<MyReports />} />
+        {/* Izveštaji su sada u Profilu — stara adresa vodi tamo. */}
+        <Route path="moji-izvestaji" element={<Navigate to="/profil" replace />} />
         <Route path="profil" element={<Profile />} />
+        <Route path="raspored" element={<Schedule />} />
         {/* Stare adrese — ako je neko sačuvao link ili ikonicu na telefonu. */}
         <Route path="moje-dnevnice" element={<Navigate to="/profil" replace />} />
         <Route path="tim" element={<Navigate to="/profil" replace />} />
         <Route path="izvestaj/:id" element={<ReportDetail />} />
 
         <Route
-          path="artikli"
+          path="podesavanja"
           element={
             <ProtectedRoute adminOnly>
-              <AdminItems />
+              <AdminSettings />
             </ProtectedRoute>
           }
         />
+        {/* Artikli su sada u Podešavanjima — stara adresa vodi tamo. */}
+        <Route path="artikli" element={<Navigate to="/podesavanja" replace />} />
         <Route
           path="radnici"
           element={
@@ -82,14 +85,8 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="uplate"
-          element={
-            <ProtectedRoute adminOnly>
-              <AdminDeposits />
-            </ProtectedRoute>
-          }
-        />
+        {/* Uplate su sada u Pregledu — stara adresa vodi tamo. */}
+        <Route path="uplate" element={<Navigate to="/" replace />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

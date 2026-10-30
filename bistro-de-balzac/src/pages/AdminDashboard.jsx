@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
@@ -18,6 +19,7 @@ import {
 import ReportListItem from '../components/ReportListItem'
 import ReportPicker from '../components/ReportPicker'
 import ReportTrash from '../components/ReportTrash'
+import AdminDeposits from './AdminDeposits'
 import StorageCleanup from '../components/StorageCleanup'
 import { heading, printDocument, statGrid, table } from '../lib/print'
 import {
@@ -49,18 +51,21 @@ export default function AdminDashboard() {
 
   const [loading, setLoading] = useState(true)
   const [reports, setReports] = useState([])
+  // Datum -> ko je tog dana radio međusmenu. Međusmena nema svoj red u spisku;
+  // pored imena u prvoj i drugoj smeni piše „Među“.
+  const [midByDate, setMidByDate] = useState(() => new Map())
   const [workers, setWorkers] = useState([])
 
   // Podrazumevano se vide samo juče i danas — ostalo se otvara kroz filtere.
-  const [from, setFrom] = useState(daysAgoISO(1))
-  const [to, setTo] = useState(todayISO())
-  const [shift, setShift] = useState('')
-  const [status, setStatus] = useState('')
-  const [worker, setWorker] = useState('')
-  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [from, setFrom] = usePersistentState('dash.from', daysAgoISO(1))
+  const [to, setTo] = usePersistentState('dash.to', todayISO())
+  const [shift, setShift] = usePersistentState('dash.shift', '')
+  const [status, setStatus] = usePersistentState('dash.status', '')
+  const [worker, setWorker] = usePersistentState('dash.worker', '')
+  const [filtersOpen, setFiltersOpen] = usePersistentState('dash.filtersOpen', false)
 
-  const [search, setSearch] = useState('')
-  const [debounced, setDebounced] = useState('')
+  const [search, setSearch] = usePersistentState('dash.search', '')
+  const [debounced, setDebounced] = useState(search)
   const [pickerOpen, setPickerOpen] = useState(false)
 
   useEffect(() => {
@@ -104,10 +109,28 @@ export default function AdminDashboard() {
     if (status) query = query.eq('status', status)
     if (worker) query = query.eq('created_by', worker)
 
-    const { data, error } = await query
+    // Međusmena se ne prikazuje kao posebna smena — samo prva i druga.
+    const [{ data, error }, midRes] = await Promise.all([
+      query.neq('shift', 'medjusmena'),
+      supabase
+        .from('report_summary')
+        .select('report_date, staff_ids')
+        .eq('shift', 'medjusmena')
+        .gte('report_date', rangeFrom)
+        .lte('report_date', rangeTo),
+    ])
 
     if (error) toast.error(errorMessage(error))
-    else setReports(data ?? [])
+    else {
+      setReports(data ?? [])
+      const mid = new Map()
+      for (const r of midRes.data ?? []) {
+        const set = mid.get(r.report_date) ?? new Set()
+        for (const wid of r.staff_ids ?? []) set.add(wid)
+        mid.set(r.report_date, set)
+      }
+      setMidByDate(mid)
+    }
     setLoading(false)
   }, [rangeFrom, rangeTo, shift, status, worker, toast])
 
@@ -136,12 +159,29 @@ export default function AdminDashboard() {
   const nameById = useMemo(() => new Map(workers.map((w) => [w.id, w.full_name])), [workers])
 
   const namesOf = useCallback(
-    (report) =>
-      (report.staff_ids ?? [])
-        .map((wid) => nameById.get(wid))
+    (report) => {
+      const mid = midByDate.get(report.report_date)
+      return (report.staff_ids ?? [])
+        .map((wid) => {
+          const name = nameById.get(wid)
+          return name ? (mid?.has(wid) ? `${name} (Među)` : name) : null
+        })
         .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b)),
-    [nameById],
+        .sort((a, b) => a.localeCompare(b))
+    },
+    [nameById, midByDate],
+  )
+
+  /** Isto, ali kao objekti — oznaka „Među“ se na listi crta pored imena. */
+  const staffOf = useCallback(
+    (report) => {
+      const mid = midByDate.get(report.report_date)
+      return (report.staff_ids ?? [])
+        .map((wid) => ({ name: nameById.get(wid), mid: !!mid?.has(wid) }))
+        .filter((s) => s.name)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    },
+    [nameById, midByDate],
   )
 
   /**
@@ -425,7 +465,7 @@ export default function AdminDashboard() {
               <Field label="Smena">
                 <Select value={shift} onChange={(e) => setShift(e.target.value)}>
                   <option value="">Sve smene</option>
-                  {SHIFTS.map((s) => (
+                  {SHIFTS.filter((s) => s.value !== 'medjusmena').map((s) => (
                     <option key={s.value} value={s.value}>
                       {s.label}
                     </option>
@@ -579,7 +619,7 @@ export default function AdminDashboard() {
                         key={report.id}
                         report={report}
                         showAuthor
-                        staffNames={namesOf(report)}
+                        staffNames={staffOf(report)}
                       />
                     ))}
                   </div>
@@ -606,6 +646,9 @@ export default function AdminDashboard() {
       {/* Održavanje prostora — da besplatnih 1 GB nikad ne popuniš */}
       {/* Obrisani popisi — 12 sati mogu da se vrate */}
       <ReportTrash onRestored={load} />
+
+      {/* Uplate: padajući meni ispod obrisanih popisa. */}
+      <AdminDeposits embedded />
 
       <StorageCleanup />
     </div>

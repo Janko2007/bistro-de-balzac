@@ -5,25 +5,30 @@ import { supabase } from './supabaseClient'
  * Admin ih menja kroz Artikli -> Kategorije.
  */
 export async function loadCategories() {
-  const columns = 'id, name, sort_order, is_active, count_every_days, last_count_on, count_due'
+  // Redom od najnovije do najstarije baze: sa zakazanim datumom popisa (-21),
+  // sa retkim popisivanjem (-11), pa osnovne kolone.
+  const attempts = [
+    'id, name, sort_order, is_active, count_every_days, last_count_on, count_due, count_on',
+    'id, name, sort_order, is_active, count_every_days, last_count_on, count_due',
+    'id, name, sort_order, is_active',
+  ]
 
-  let { data, error } = await supabase
-    .from('categories')
-    .select(columns)
-    .order('sort_order', { ascending: true })
-    .order('name', { ascending: true })
-
-  // Baza u kojoj skripta za retko popisivanje još nije puštena nema te kolone.
-  if (error) {
-    const fallback = await supabase
+  let data = null
+  let lastError = null
+  for (const columns of attempts) {
+    const res = await supabase
       .from('categories')
-      .select('id, name, sort_order, is_active')
+      .select(columns)
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true })
-    if (fallback.error) throw fallback.error
-    data = fallback.data
+    if (!res.error) {
+      data = res.data
+      lastError = null
+      break
+    }
+    lastError = res.error
   }
-
+  if (lastError) throw lastError
   // Starije baze nemaju kolonu `is_active` — tamo je sve vidljivo.
   return (data ?? []).map((c) => ({
     ...c,
@@ -31,6 +36,7 @@ export async function loadCategories() {
     count_every_days: Number(c.count_every_days ?? 0) || 0,
     last_count_on: c.last_count_on ?? null,
     count_due: c.count_due === true,
+    count_on: c.count_on ?? null,
   }))
 }
 
@@ -53,6 +59,14 @@ export function isCountDue(category, dateISO) {
   const every = Number(category?.count_every_days ?? 0)
   if (!(every > 0)) return true
   if (category.count_due) return true
+  // Zakazan datum (Popisi → Raspored): važi dok se grupa ne popiše posle njega.
+  if (
+    category.count_on &&
+    category.count_on <= dateISO &&
+    (!category.last_count_on || category.last_count_on < category.count_on)
+  ) {
+    return true
+  }
   if (!category.last_count_on) return true
   return daysBetween(category.last_count_on, dateISO) >= every
 }
@@ -60,7 +74,12 @@ export function isCountDue(category, dateISO) {
 /** Datum sledećeg popisa, ili null ako se grupa popisuje svaku smenu. */
 export function nextCountOn(category) {
   const every = Number(category?.count_every_days ?? 0)
-  if (!(every > 0) || !category.last_count_on) return null
+  if (!(every > 0)) return null
+  // Zakazani datum ima prednost dok se grupa ne popiše posle njega.
+  if (category.count_on && (!category.last_count_on || category.last_count_on < category.count_on)) {
+    return category.count_on
+  }
+  if (!category.last_count_on) return null
   const d = new Date(`${category.last_count_on}T00:00:00`)
   d.setDate(d.getDate() + every)
   return d.toISOString().slice(0, 10)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -25,24 +26,36 @@ export default function Team({ bare = false }) {
   const [people, setPeople] = useState([])
   const [badges, setBadges] = useState([])
   const [owned, setOwned] = useState(new Map())
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = usePersistentState('team.open', false)
 
   const load = useCallback(async () => {
     try {
-      const [peopleRes, badgeList, ownedMap] = await Promise.all([
+      const fetchPeople = (columns) =>
         supabase
           .from('profiles')
-          .select('id, full_name, avatar_path, role, position, is_active, sort_order')
+          .select(columns)
           .eq('is_deleted', false)
           .eq('is_active', true)
           .order('sort_order')
-          .order('full_name'),
+          .order('full_name')
+
+      const [firstTry, badgeList, ownedMap] = await Promise.all([
+        fetchPeople('id, full_name, avatar_path, role, position, is_active, sort_order, hidden_from_team'),
         loadBadges({ onlyActive: true }),
         loadWorkerBadges(),
       ])
+      // Baza bez skripte za sakrivanje (-24) nema tu kolonu — tim se i tada prikazuje.
+      const peopleRes = firstTry.error
+        ? await fetchPeople('id, full_name, avatar_path, role, position, is_active, sort_order')
+        : firstTry
 
       if (peopleRes.error) throw peopleRes.error
-      setPeople(peopleRes.data ?? [])
+      // Sakriveni radnici se ne vide u Timu (admin i oni sami ih i dalje vide).
+      setPeople(
+        (peopleRes.data ?? []).filter(
+          (p) => p.hidden_from_team !== true || profile?.role === 'admin' || p.id === profile?.id,
+        ),
+      )
       setBadges(badgeList)
       setOwned(ownedMap)
     } catch (err) {
@@ -50,7 +63,7 @@ export default function Team({ bare = false }) {
       toast.error(errorMessage(err, 'Ne mogu da učitam tim.'))
     }
     setLoading(false)
-  }, [toast])
+  }, [toast, profile?.id, profile?.role])
 
   useEffect(() => {
     load()
