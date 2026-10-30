@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -38,7 +39,7 @@ import {
  *  je više nego dovoljno, a upit ostaje mali. */
 const WINDOW_DAYS = 180
 
-export default function AdminDeposits() {
+export default function AdminDeposits({ embedded = false }) {
   const { profile } = useAuth()
   const toast = useToast()
 
@@ -54,10 +55,20 @@ export default function AdminDeposits() {
 
   /* Istorija uplata: vidi se samo poslednja, strelica otvara još četiri, a
      starije se dobijaju izborom meseca ili pretragom. */
-  const [depOpen, setDepOpen] = useState(false)
-  const [depSearchOpen, setDepSearchOpen] = useState(false)
-  const [depSearch, setDepSearch] = useState('')
-  const [depMonth, setDepMonth] = useState('') // '' = svi meseci
+  const [depOpen, setDepOpen] = usePersistentState('deposits.depOpen', false)
+  const [depSearchOpen, setDepSearchOpen] = usePersistentState('deposits.depSearchOpen', false)
+  const [depSearch, setDepSearch] = usePersistentState('deposits.depSearch', '')
+  const [depMonth, setDepMonth] = usePersistentState('deposits.depMonth', '') // '' = svi meseci
+  // Uplate žive u Pregledu kao padajući meni; dani su zatvoreni dok se ne kliknu.
+  const [sectionOpen, setSectionOpen] = usePersistentState('deposits.sectionOpen', false)
+  const [openGroups, setOpenGroups] = usePersistentState('deposits.openGroups', () => new Set())
+  const toggleGroupOpen = (key) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
   const [dayToDelete, setDayToDelete] = useState(null) // dan čiji se popisi brišu
 
   /* ---------------------------------------------------------------- */
@@ -444,7 +455,7 @@ export default function AdminDeposits() {
 
     printDocument({
       title: 'Uplate pazara',
-      subtitle: 'Gotovina iz zatvorenih smena — šta čeka polog, a šta je već uplaćeno',
+      subtitle: 'Predato iz zatvorenih smena — šta čeka polog, a šta je već uplaćeno',
       meta: [
         { label: 'Na dan', value: formatDate(todayISO()) },
         { label: 'Period', value: `poslednjih ${WINDOW_DAYS} dana` },
@@ -481,7 +492,7 @@ export default function AdminDeposits() {
                 { label: 'Datum', width: '16%' },
                 { label: 'Dan' },
                 { label: 'Smena', align: 'right', width: '12%' },
-                { label: 'Gotovina', align: 'right', width: '18%' },
+                { label: 'Predato', align: 'right', width: '18%' },
               ],
               rows: owedRows,
               empty: 'Sve je uplaćeno — nema dana koji čeka polog.',
@@ -510,7 +521,7 @@ export default function AdminDeposits() {
                 { label: 'Dan', width: '14%' },
                 { label: 'Pazar', align: 'right', width: '14%' },
                 { label: 'Kartice', align: 'right', width: '14%' },
-                { label: 'Gotovina', align: 'right', width: '14%' },
+                { label: 'Predato', align: 'right', width: '14%' },
                 { label: 'Uplata' },
               ],
               rows: dayRows,
@@ -521,11 +532,54 @@ export default function AdminDeposits() {
     })
   }
 
-  if (loading) return <FullPageLoader />
+  if (loading) {
+    return embedded ? (
+      <Card>
+        <p className="px-4 py-3.5 text-sm text-stone-400">Učitavam uplate…</p>
+      </Card>
+    ) : (
+      <FullPageLoader />
+    )
+  }
 
   return (
     <div className="space-y-4">
+      {/* ---------- Uplate kao padajući meni (u Pregledu) ---------- */}
+      {embedded && (
+        <Card>
+          <button
+            type="button"
+            onClick={() => setSectionOpen((v) => !v)}
+            aria-expanded={sectionOpen}
+            className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+          >
+            <svg
+              className={cx('h-4 w-4 shrink-0 text-stone-400 transition-transform', sectionOpen && 'rotate-90')}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-semibold tracking-tight text-stone-900">Uplate</span>
+              <span className="mt-0.5 block text-[13px] text-stone-500">
+                {totals.owed > 0 ? `Za uplatu ${formatMoney(totals.owed, false)}` : 'Sve je uplaćeno'}
+              </span>
+            </span>
+            {totals.due > 0 && <Badge className="bg-rose-100 text-rose-700 ring-rose-600/20">rok stigao</Badge>}
+          </button>
+        </Card>
+      )}
+
+      {(!embedded || sectionOpen) && (
+      <div className="space-y-4">
       {/* ---------- Koliko ima da se uplati ---------- */}
+      {!embedded && (
       <StatRow className="grid-cols-2 sm:grid-cols-4">
         {/* „Za uplatu“ je sve što još nije u banci; „Rok stigao“ je onaj deo
             kojem je dan uplate već došao — to ide prvo. */}
@@ -546,6 +600,7 @@ export default function AdminDeposits() {
           value={formatMoney(totals.paidThisMonth, false)}
         />
       </StatRow>
+      )}
 
       {/* ---------- Dani koji čekaju uplatu ---------- */}
       <Card>
@@ -574,26 +629,46 @@ export default function AdminDeposits() {
           <EmptyState
             icon="✓"
             title="Sve je uplaćeno"
-            description="Nema dana sa gotovinom koji čeka polog u banku."
+            description="Nema dana sa predatim novcem koji čeka polog u banku."
           />
         ) : (
           <div className="divide-y divide-stone-100">
             {groups.map((group) => {
               const allOn = group.days.every((d) => selected.has(d.date))
+              const groupOpen = openGroups.has(group.due)
               return (
                 <div key={group.due}>
                   {/* Zaglavlje grupe = dan uplate */}
                   <div className="flex items-center gap-2.5 bg-stone-50 px-4 py-2.5">
-                    <div className="min-w-0 flex-1">
-                      {/* Sme da se prelomi — uz naslov stoje i bedž i dugme,
-                          pa bi se na telefonu datum odsekao. */}
-                      <p className="text-xs font-bold uppercase leading-snug tracking-wide text-stone-600">
-                        Uplata {longDay(group.due)}
-                      </p>
-                      <p className="mt-0.5 text-[11px] text-stone-500">
-                        {countLabel(group.days.length, 'dan')} · {formatMoney(group.total)}
-                      </p>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleGroupOpen(group.due)}
+                      aria-expanded={groupOpen}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <svg
+                        className={cx('h-4 w-4 shrink-0 text-stone-400 transition-transform', groupOpen && 'rotate-90')}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M9 18l6-6-6-6" />
+                      </svg>
+                      <span className="min-w-0 flex-1">
+                        {/* Sme da se prelomi — uz naslov stoje i bedž i dugme,
+                            pa bi se na telefonu datum odsekao. */}
+                        <span className="block text-xs font-bold uppercase leading-snug tracking-wide text-stone-600">
+                          Uplata {longDay(group.due)}
+                        </span>
+                        <span className="mt-0.5 block text-[11px] text-stone-500">
+                          {countLabel(group.days.length, 'dan')} · {formatMoney(group.total)}
+                        </span>
+                      </span>
+                    </button>
 
                     {group.overdue ? (
                       <Badge className="bg-rose-100 text-rose-700 ring-rose-600/20">
@@ -611,7 +686,7 @@ export default function AdminDeposits() {
                   </div>
 
                   {/* Dani u grupi */}
-                  {group.days.map((day) => (
+                  {groupOpen && group.days.map((day) => (
                     <DayRow
                       key={day.date}
                       day={day}
@@ -627,8 +702,8 @@ export default function AdminDeposits() {
         )}
 
         <p className="border-t border-stone-100 px-4 py-2.5 text-xs text-stone-500">
-          Računa se samo <strong>gotovina</strong> iz zatvorenih smena — kartice idu pravo na
-          račun, a smena koja je još u toku nema zaključen pazar.
+          Obračunava se samo <strong>predato</strong> iz zatvorenih smena. Smena koja je još u
+          toku nije uračunata.
         </p>
       </Card>
 
@@ -813,6 +888,9 @@ export default function AdminDeposits() {
         )}
       </Card>
 
+      </div>
+      )}
+
       {/* ================================================================ */}
       {/*  Modal: upis uplate                                              */}
       {/* ================================================================ */}
@@ -986,7 +1064,7 @@ function DayRow({ day, checked, onToggle, onDelete }) {
           {longDay(day.date)}
         </span>
         <span className="block truncate text-[11px] text-stone-500">
-          {countLabel(day.closed, 'smena')} · kartice {formatMoney(day.card, false)}
+          {countLabel(day.closed, 'smena')}
           {day.open > 0 && ' · smena u toku nije uračunata'}
         </span>
       </span>

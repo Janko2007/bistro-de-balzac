@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 import { Link } from 'react-router-dom'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { EMPTY_STATS, loadWorkStats, settle } from '../lib/earnings'
 import { currentPeriod } from '../lib/payperiod'
+import MyReportsFold from '../components/MyReportsFold'
 import PeriodPicker from '../components/PeriodPicker'
 import { Card, EmptyState, FullPageLoader } from '../components/ui'
 import {
@@ -60,11 +62,11 @@ export default function MyEarnings() {
   const { profile } = useAuth()
   const toast = useToast()
 
-  const [period, setPeriod] = useState(() => currentPeriod())
+  const [period, setPeriod] = usePersistentState('myearn.period', () => currentPeriod())
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState(EMPTY_STATS)
-  const [shiftsOpen, setShiftsOpen] = useState(false)
-  const [paysOpen, setPaysOpen] = useState(false)
+  const [shiftsOpen, setShiftsOpen] = usePersistentState('myearn.shiftsOpen', false)
+  const [paysOpen, setPaysOpen] = usePersistentState('myearn.paysOpen', false)
 
   const range = useMemo(
     () => ({ from: period.from, to: period.to, periodKey: period.key }),
@@ -100,6 +102,17 @@ export default function MyEarnings() {
     .filter(Boolean)
     .join(' · ')
 
+  /* Uslovi rada (ranije ispod imena): dnevnica ili plata, procenat, u timu od. */
+  const percent = Number(profile?.percent ?? 0)
+  const terms = [
+    profile?.pay_model === 'plata'
+      ? `plata ${formatMoney(profile?.monthly_salary, false)}`
+      : `dnevnica ${formatMoney(profile?.daily_wage, false)}`,
+    percent > 0 ? `${percent}%` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
     <div className="space-y-4">
       {/* ---------- Koliko imam da primim ---------- */}
@@ -122,6 +135,7 @@ export default function MyEarnings() {
               {formatMoney(Math.abs(calc.balance), false)}
             </p>
             <p className="mt-1.5 text-[13px] tabular-nums text-stone-500">{detail}</p>
+            <p className="mt-1 text-[12px] tabular-nums text-stone-400">{terms}</p>
 
             {calc.returned > 0 && (
               <p className="mt-2 text-xs text-amber-700">
@@ -229,6 +243,9 @@ export default function MyEarnings() {
               </ul>
             ))}
         </div>
+
+        {/* Moji izveštaji: poslednja tri, ostali pretragom */}
+        <MyReportsFold />
       </Card>
     </div>
   )

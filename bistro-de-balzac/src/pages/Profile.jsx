@@ -1,10 +1,12 @@
 import { useAuth } from '../context/AuthContext'
 import { AvatarEditor } from '../components/Avatar'
+import AboutApp from '../components/AboutApp'
+import ThemePicker from '../components/ThemePicker'
+import AnnouncementList from '../components/AnnouncementList'
 import BadgeInfo from '../components/BadgeInfo'
 import MyDetails from '../components/MyDetails'
 import RuleDocs from '../components/RuleDocs'
 import { Card } from '../components/ui'
-import { formatDate, formatMoney } from '../lib/utils'
 import MyEarnings from './MyEarnings'
 import Team from './Team'
 
@@ -19,19 +21,6 @@ import Team from './Team'
 export default function Profile() {
   const { profile, isAdmin, refreshProfile } = useAuth()
 
-  const naPlati = profile?.pay_model === 'plata'
-  const procenat = Number(profile?.percent ?? 0)
-
-  // Sve što je ranije bilo u tabeli — u jednom redu ispod imena.
-  const meta = [
-    isAdmin ? 'Admin' : 'Radnik',
-    naPlati
-      ? `plata ${formatMoney(profile?.monthly_salary, false)}`
-      : `dnevnica ${formatMoney(profile?.daily_wage, false)}`,
-    procenat > 0 ? `${procenat}%` : null,
-    profile?.created_at ? `u timu od ${formatDate(profile.created_at.slice(0, 10))}` : null,
-  ].filter(Boolean)
-
   return (
     <div className="space-y-4">
       {/* ---------- Ja ---------- */}
@@ -45,25 +34,30 @@ export default function Profile() {
             <h1 className="truncate text-lg font-bold tracking-tight text-stone-900">
               {profile.full_name}
             </h1>
-            <p className="text-sm text-stone-500">{meta.join(' · ')}</p>
           </AvatarEditor>
         )}
       </Card>
 
       {/* ---------- Telefon i radno iskustvo — radnik ih upisuje sam ---------- */}
-      <MyDetails />
+      <MyDetails role={[isAdmin ? 'Admin' : 'Radnik', profile?.position?.trim()].filter(Boolean).join(' · ')} />
 
       {/* ---------- Dnevnice ---------- */}
       <MyEarnings />
 
       {/* ---------- Tim, Bedževi i Radnici meseca — jedna kartica ---------- */}
       <Card className="divide-y divide-stone-100">
+        <AnnouncementList bare />
         <Team bare />
         <BadgeInfo bare />
       </Card>
 
       {/* ---------- Pravila i obaveze ---------- */}
       <RuleDocs />
+
+      {/* ---------- O aplikaciji: logo, Instagram, sajt (radnička verzija) ---------- */}
+      {!isAdmin && <ThemePicker />}
+
+      {!isAdmin && <AboutApp />}
     </div>
   )
 }

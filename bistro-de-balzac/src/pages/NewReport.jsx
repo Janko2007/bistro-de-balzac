@@ -1970,7 +1970,7 @@ export default function NewReport() {
       <div style={{ order: ord('obaveza') }} className={sectionHidden('obaveza')}>
       <Card>
         <CardHeader
-          title={` — ${dailyTask.day}`}
+          title={dailyTask.day}
           action={
             taskDone ? (
               <Badge className="shrink-0 bg-emerald-100 text-emerald-800 ring-emerald-600/20">
