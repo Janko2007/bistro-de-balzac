@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
-import { cx, errorMessage } from '../lib/utils'
+import { cx, errorMessage, formatDate } from '../lib/utils'
 import { Button, Card, Field, Input, Textarea } from './ui'
 
 const MAX_EXPERIENCE = 1500
@@ -16,7 +16,7 @@ const MAX_EXPERIENCE = 1500
  * skripta za bazu još nije puštena, prijava ostaje ispravna a polje za
  * iskustvo se jednostavno ne prikazuje.
  */
-export default function MyDetails() {
+export default function MyDetails({ role = '' }) {
   const { profile, refreshProfile } = useAuth()
   const toast = useToast()
 
@@ -130,6 +130,25 @@ export default function MyDetails() {
 
       {open && (
         <form onSubmit={save} className="space-y-4 border-t border-stone-100 p-4">
+          {(role || profile?.created_at) && (
+            <div className="grid grid-cols-2 gap-3">
+              {role && (
+                <div className="min-w-0">
+                  <p className="eyebrow">Radno mesto</p>
+                  <p className="mt-0.5 text-sm font-semibold text-stone-800">{role}</p>
+                </div>
+              )}
+              {profile?.created_at && (
+                <div className="min-w-0">
+                  <p className="eyebrow">U timu od</p>
+                  <p className="mt-0.5 text-sm font-semibold tabular-nums text-stone-800">
+                    {formatDate(profile.created_at.slice(0, 10))}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           <Field label="Broj telefona">
             <Input
               type="tel"
