@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { usePersistentState } from '../lib/persist'
-import { Link } from 'react-router-dom'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -8,9 +7,8 @@ import { EMPTY_STATS, loadWorkStats, settle } from '../lib/earnings'
 import { currentPeriod } from '../lib/payperiod'
 import MyReportsFold from '../components/MyReportsFold'
 import PeriodPicker from '../components/PeriodPicker'
-import { Card, EmptyState, FullPageLoader } from '../components/ui'
+import { Card, FullPageLoader } from '../components/ui'
 import {
-  SHIFT_LABELS,
   cx,
   errorMessage,
   formatDate,
@@ -56,7 +54,7 @@ function Toggle({ title, count, open, onClick }) {
  * Dnevnice radnika — deo ekrana Profil.
  *
  * Gore jedan veliki iznos („imaš da primiš“) i jedan sitan red ispod njega.
- * Odrađene smene i isplate su zatvorene dok se ne kliknu.
+ * Moji izveštaji i isplate su zatvoreni dok se ne kliknu.
  */
 export default function MyEarnings() {
   const { profile } = useAuth()
@@ -65,7 +63,6 @@ export default function MyEarnings() {
   const [period, setPeriod] = usePersistentState('myearn.period', () => currentPeriod())
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState(EMPTY_STATS)
-  const [shiftsOpen, setShiftsOpen] = usePersistentState('myearn.shiftsOpen', false)
   const [paysOpen, setPaysOpen] = usePersistentState('myearn.paysOpen', false)
 
   const range = useMemo(
@@ -117,7 +114,11 @@ export default function MyEarnings() {
     <div className="space-y-4">
       {/* ---------- Koliko imam da primim ---------- */}
       <Card className="p-4">
-        <PeriodPicker period={period} onChange={setPeriod} />
+        <PeriodPicker
+          period={period}
+          onChange={setPeriod}
+          since={profile?.created_at?.slice(0, 10) ?? ''}
+        />
 
         {loading ? (
           <FullPageLoader />
@@ -146,60 +147,10 @@ export default function MyEarnings() {
         )}
       </Card>
 
-      {/* ---------- Odrađene smene i isplate: zatvoreno dok se ne klikne ---------- */}
+      {/* ---------- Moji izveštaji i isplate: zatvoreno dok se ne klikne ---------- */}
       <Card className="divide-y divide-stone-100">
-        <div>
-          <Toggle
-            title="Odrađene smene"
-            count={calc.shifts}
-            open={shiftsOpen}
-            onClick={() => setShiftsOpen((v) => !v)}
-          />
-          {shiftsOpen &&
-            (calc.shiftList.length === 0 ? (
-              <EmptyState icon="🗓️" title="Nema smena u ovom periodu" />
-            ) : (
-              <ul className="divide-y divide-stone-100 border-t border-stone-100">
-                {calc.shiftList.map((s) => (
-                  <li key={s.id}>
-                    <Link
-                      to={`/izvestaj/${s.id}`}
-                      className="flex items-center gap-3 px-4 py-2.5 transition hover:bg-stone-50"
-                    >
-                      <span className="text-sm font-semibold text-stone-800">
-                        {formatDate(s.report_date)}
-                      </span>
-                      <span className="text-xs text-stone-500">
-                        {SHIFT_LABELS[s.shift] ?? s.shift}
-                      </span>
-                      {/* Na dnevnici se uz smenu vidi i koliko nosi; ako je admin za taj
-                          dan upisao umanjeni iznos, piše on. */}
-                      {calc.model === 'dnevnica' && (
-                        <span
-                          className={cx(
-                            'ml-auto text-sm font-bold tabular-nums',
-                            s.wage_override !== null && s.wage_override !== undefined
-                              ? 'text-rose-600'
-                              : s.status === 'potvrdjen'
-                                ? 'text-emerald-700'
-                                : 'text-stone-500',
-                          )}
-                        >
-                          +
-                          {formatMoney(
-                            s.wage_override !== null && s.wage_override !== undefined
-                              ? s.wage_override
-                              : calc.wage,
-                            false,
-                          )}
-                        </span>
-                      )}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            ))}
-        </div>
+        {/* Moji izveštaji: poslednja tri, ostali pretragom */}
+        <MyReportsFold />
 
         <div>
           <Toggle
@@ -243,9 +194,6 @@ export default function MyEarnings() {
               </ul>
             ))}
         </div>
-
-        {/* Moji izveštaji: poslednja tri, ostali pretragom */}
-        <MyReportsFold />
       </Card>
     </div>
   )

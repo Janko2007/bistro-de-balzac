@@ -102,6 +102,8 @@ function toDb(value) {
 /** Prodato — kod „krajnje“ se računa, inače ga radnik upisuje. */
 function soldOf(row, mode) {
   if (mode !== 'krajnje') return parseNumber(row.p)
+  // Dok krajnje nije upisano, prodato se ne računa (inače bi ispalo sve početno).
+  if ((row.e ?? '') === '') return 0
   return round2(parseNumber(row.s) + parseNumber(row.d) - parseNumber(row.e))
 }
 
@@ -199,6 +201,9 @@ export default function NewReport() {
   const [myOpen, setMyOpen] = useState([]) // sve smene u kojima je radnik trenutno
   const [reportId, setReportId] = useState(null)
   const [status, setStatus] = useState(null)
+  // Poruka admina i artikli čije se stanje ne poklapa — radnik ih vidi dok je popis vraćen.
+  const [returnInfo, setReturnInfo] = useState({ note: '', mismatches: [] })
+  const [returnOpen, setReturnOpen] = useState(false)
   const [staff, setStaff] = useState([])
   // Za koji je izveštaj učitano ko radi u njemu — dok to ne stigne, ne zna se
   // da li je admin u smeni ili je samo uređuje.
@@ -516,6 +521,33 @@ export default function NewReport() {
     if (reportId) loadReport(reportId)
   }, [reportId, loadReport])
 
+  // Šta je admin vratio na ispravku: poruka i artikli koji se ne poklapaju.
+  // Posebni upiti — ako baza nema te kolone, popis se i dalje normalno učitava.
+  useEffect(() => {
+    if (!reportId || status !== 'vracen') {
+      setReturnInfo({ note: '', mismatches: [] })
+      return undefined
+    }
+    let active = true
+    Promise.all([
+      supabase.from('shift_reports').select('admin_note').eq('id', reportId).maybeSingle(),
+      supabase
+        .from('shift_report_items')
+        .select('item_name, qty_end, check_status, check_qty')
+        .eq('report_id', reportId)
+        .eq('check_status', 'fali'),
+    ]).then(([noteRes, checkRes]) => {
+      if (!active) return
+      setReturnInfo({
+        note: noteRes.error ? '' : (noteRes.data?.admin_note ?? ''),
+        mismatches: checkRes.error ? [] : (checkRes.data ?? []),
+      })
+    })
+    return () => {
+      active = false
+    }
+  }, [reportId, status])
+
   /* ------------------------------------------------------------ */
   /*  Uživo — šta kolega upiše, vidi se odmah                      */
   /* ------------------------------------------------------------ */
@@ -641,7 +673,8 @@ export default function NewReport() {
             // ostavlja prazan. Šta se upisuje a šta računa zavisi od načina
             // popisa (zalihe, brojač ili krajnje stanje).
             qty_sold: soldOf(row, mode),
-            qty_end: endOf(row, mode),
+            // Krajnje koje nije upisano ostaje prazno (NULL), ne nula.
+            qty_end: mode === 'krajnje' && (row.e ?? '') === '' ? null : endOf(row, mode),
             is_counter: mode === 'brojac',
             count_mode: mode,
           },
@@ -1510,6 +1543,77 @@ export default function NewReport() {
         </div>
       )}
 
+      {/* Popis je vraćen na ispravku: zatvoreno dok radnik ne klikne, pa vidi
+          šta se ne poklapa i poruku koju je admin ostavio. */}
+      {status === 'vracen' && !adminEdit && (
+        <div
+          className="overflow-hidden rounded-2xl bg-rose-50 ring-1 ring-inset ring-rose-200"
+          style={{ order: -3 }}
+        >
+          <button
+            type="button"
+            onClick={() => setReturnOpen((v) => !v)}
+            aria-expanded={returnOpen}
+            className="flex w-full items-center gap-2.5 px-4 py-3.5 text-left"
+          >
+            <svg
+              className={cx('h-4 w-4 shrink-0 text-rose-400 transition-transform', returnOpen && 'rotate-90')}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-bold tracking-tight text-rose-900">
+                Popis je vraćen na ispravku
+              </span>
+              <span className="mt-0.5 block text-[13px] text-rose-700">
+                Dodirni da vidiš šta treba da ispraviš
+              </span>
+            </span>
+            {returnInfo.mismatches.length > 0 && (
+              <span className="shrink-0 rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-rose-700">
+                {returnInfo.mismatches.length}
+              </span>
+            )}
+          </button>
+
+          {returnOpen && (
+            <div className="space-y-3 border-t border-rose-200 px-4 py-3">
+              {returnInfo.note && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-rose-700">Poruka od admina</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-rose-900">{returnInfo.note}</p>
+                </div>
+              )}
+              {returnInfo.mismatches.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-rose-700">Stanje se ne poklapa</p>
+                  <ul className="mt-1.5 space-y-0.5 text-sm text-rose-900">
+                    {returnInfo.mismatches.map((m) => (
+                      <li key={m.item_name}>
+                        <b>{m.item_name}</b> · upisano {formatQty(m.qty_end)}
+                        {m.check_qty !== null && m.check_qty !== undefined
+                          ? `, tačno ${formatQty(m.check_qty)}`
+                          : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {!returnInfo.note && returnInfo.mismatches.length === 0 && (
+                <p className="text-sm text-rose-800">Admin nije ostavio poruku. Proveri popis i pošalji ga ponovo.</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ order: -1 }}>{shiftCard}</div>
 
       {/* ---------- Pazar — otvara se klikom ---------- */}
@@ -1769,7 +1873,7 @@ export default function NewReport() {
                                   key={c.key}
                                   className={cx(
                                     'w-[78px] text-center text-base font-bold tabular-nums',
-                                    racunato && done
+                                    racunato && done && row.e !== ''
                                       ? bad
                                         ? 'text-rose-600'
                                         : 'text-stone-500'
@@ -1777,7 +1881,7 @@ export default function NewReport() {
                                   )}
                                   title={racunato ? 'Prodato = (početno + dodato) − krajnje' : undefined}
                                 >
-                                  {racunato && done ? formatQty(sold) : '—'}
+                                  {racunato && done && row.e !== '' ? formatQty(sold) : '—'}
                                 </span>
                               )
                             }

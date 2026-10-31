@@ -142,9 +142,9 @@ export function Select({ className, children, ...props }) {
   )
 }
 
-export function Textarea({ className, ...props }) {
-  return <textarea className={cx('field resize-y', className)} rows={3} {...props} />
-}
+export const Textarea = forwardRef(function Textarea({ className, ...props }, ref) {
+  return <textarea ref={ref} className={cx('field resize-y', className)} rows={3} {...props} />
+})
 
 /** Polje za novac — veliko, pregledno, mobile-friendly. */
 export function MoneyInput({ value, onChange, ...props }) {

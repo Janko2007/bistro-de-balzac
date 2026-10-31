@@ -4,6 +4,7 @@ import { usePersistentState } from '../lib/persist'
 import { useAuth } from '../context/AuthContext'
 import { imageUrl, loadMine } from '../lib/announcements'
 import { cx, formatDate } from '../lib/utils'
+import RichText from './RichText'
 import { Card } from './ui'
 
 /** Jedna slika iz obaveštenja — traži se tek kad se red otvori. */
@@ -17,7 +18,7 @@ function Photo({ path }) {
     }
   }, [path])
   return url ? (
-    <img src={url} alt="" className="mt-2 max-h-60 w-full rounded-xl object-cover" />
+    <img src={url} alt="" className="mt-2 block max-h-[70dvh] w-full rounded-xl bg-stone-50 object-contain" />
   ) : (
     <div className="mt-2 h-32 animate-pulse rounded-xl bg-stone-100" />
   )
@@ -108,9 +109,6 @@ export default function AnnouncementList({ bare = false }) {
                   aria-expanded={isOpen}
                   className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-stone-50"
                 >
-                  <span className="text-2xl leading-none" aria-hidden="true">
-                    {a.icon}
-                  </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5">
                       <span className="truncate text-sm font-bold text-stone-900">{a.title || 'Obaveštenje'}</span>
@@ -125,9 +123,11 @@ export default function AnnouncementList({ bare = false }) {
                     {isOpen && (
                       <span className="mt-1.5 block">
                         {a.body && (
-                          <span className="block whitespace-pre-line text-[13px] leading-relaxed text-stone-600">
-                            {a.body}
-                          </span>
+                          <RichText
+                            body={a.body}
+                            className="space-y-1 text-[14px] leading-relaxed text-stone-600"
+                            subtitleClassName="text-[15px] font-bold leading-snug text-stone-500"
+                          />
                         )}
                         {a.image_path && <Photo path={a.image_path} />}
                       </span>

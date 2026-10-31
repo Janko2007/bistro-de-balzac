@@ -643,12 +643,13 @@ export default function AdminDashboard() {
         onConfirm={printReports}
       />
 
-      {/* Održavanje prostora — da besplatnih 1 GB nikad ne popuniš */}
-      {/* Obrisani popisi — 12 sati mogu da se vrate */}
+      {/* Uplate: padajući meni, iznad obrisanih popisa. */}
+      <AdminDeposits embedded />
+
+      {/* Obrisani popisi — padajući meni, 12 sati mogu da se vrate */}
       <ReportTrash onRestored={load} />
 
-      {/* Uplate: padajući meni ispod obrisanih popisa. */}
-      <AdminDeposits embedded />
+      {/* Održavanje prostora — da besplatnih 1 GB nikad ne popuniš */}
 
       <StorageCleanup />
     </div>

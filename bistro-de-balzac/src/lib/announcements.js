@@ -1,5 +1,4 @@
 import { supabase } from './supabaseClient'
-import { compressImage } from './image'
 
 /**
  * Obaveštenja — admin ih šalje svima ili jednoj osobi; radnik ih vidi jednom
@@ -18,8 +17,8 @@ export const KINDS = {
 
 export const EFFECTS = [
   { value: 'bez', label: 'Bez efekta' },
-  { value: 'konfete', label: '🎊 Konfete' },
-  { value: 'vatromet', label: '🎆 Vatromet' },
+  { value: 'konfete', label: 'Konfete' },
+  { value: 'vatromet', label: 'Vatromet' },
 ]
 
 /** Sva obaveštenja koja su MENI namenjena (za sve ili baš za mene), najnovije prvo. */
@@ -38,7 +37,8 @@ export async function loadMine(profileId) {
   if (list.error || reads.error) return { items: [], seen: new Set(), missing: true }
 
   return {
-    items: list.data ?? [],
+    // Za bedževe se obaveštenja više ne šalju (ni stara se ne prikazuju).
+    items: (list.data ?? []).filter((a) => a.kind !== 'bedz'),
     seen: new Set((reads.data ?? []).map((r) => r.announcement_id)),
     missing: false,
   }
@@ -62,14 +62,19 @@ export async function imageUrl(path) {
   return error ? null : data?.signedUrl ?? null
 }
 
-/** Šalje sliku u folder obavestenja/ i vraća putanju. */
+/**
+ * Šalje sliku u folder obavestenja/ i vraća putanju.
+ * Slika ide ORIGINALNA — u boji i u punoj oštrini, bez smanjivanja.
+ */
 export async function uploadImage(file) {
-  const compressed = await compressImage(file)
-  const ext = (compressed.type?.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
-  const path = `obavestenja/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const ext = (file.name?.split('.').pop() || file.type?.split('/')[1] || 'jpg')
+    .toLowerCase()
+    .replace('jpeg', 'jpg')
+    .replace(/[^a-z0-9]/g, '')
+  const path = `obavestenja/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext || 'jpg'}`
   const { error } = await supabase.storage
     .from('izvestaji')
-    .upload(path, compressed, { contentType: compressed.type, upsert: false })
+    .upload(path, file, { contentType: file.type || 'image/jpeg', upsert: false })
   if (error) throw error
   return path
 }
@@ -95,7 +100,7 @@ export async function loadAll() {
     .order('created_at', { ascending: false })
     .limit(100)
   if (error) return []
-  return data ?? []
+  return (data ?? []).filter((a) => a.kind !== 'bedz')
 }
 
 export async function removeAnnouncement(item) {

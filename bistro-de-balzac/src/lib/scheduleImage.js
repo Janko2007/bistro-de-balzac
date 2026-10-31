@@ -1,4 +1,4 @@
-import { DAY_NAMES, SHIFT_INFO, SLOT_LABELS, shiftsOf, shortDate, slotsOf, toCyrillic, weekDays, weekLabel } from './schedule'
+import { DAY_NAMES, SHIFT_INFO, SLOT_LABELS, hasCustomTime, timeOf, shiftsOf, shortDate, slotsOf, toCyrillic, weekDays, weekLabel } from './schedule'
 
 /**
  * Raspored kao slika (PNG): čist, svetao izgled — bela podloga, tanke linije,
@@ -8,7 +8,7 @@ import { DAY_NAMES, SHIFT_INFO, SLOT_LABELS, shiftsOf, shortDate, slotsOf, toCyr
 const PAD = 18
 const LABEL_W = 118
 const DAY_W = 156
-const HEAD_H = 76
+const HEAD_H = 92
 const SCALE = 2 // dvostruka oštrina, da slika bude jasna i kad se uveća
 const FONT = "'Inter', 'Segoe UI', Arial, sans-serif"
 
@@ -157,9 +157,9 @@ export async function renderScheduleCanvas({ week, slots, names, cyr = false, bl
 
   // logo gore levo
   if (logoImg) {
-    const size = 44
+    const size = 76
     ctx.save()
-    roundRect(ctx, X0 + (LABEL_W - size) / 2, Y0 + (HEAD_H - size) / 2, size, size, 10)
+    roundRect(ctx, X0 + (LABEL_W - size) / 2, Y0 + (HEAD_H - size) / 2, size, size, 16)
     ctx.clip()
     ctx.drawImage(logoImg, X0 + (LABEL_W - size) / 2, Y0 + (HEAD_H - size) / 2, size, size)
     ctx.restore()
@@ -224,6 +224,12 @@ export async function renderScheduleCanvas({ week, slots, names, cyr = false, bl
           ctx.font = `600 19px ${FONT}`
           ctx.fillText(name, cx, role ? cy + 7 : cy)
         })
+        // Vreme se piše u polju samo kad je za taj dan drugačije od uobičajenog.
+        if (hasCustomTime(week, shift, day)) {
+          ctx.fillStyle = BRAND
+          ctx.font = `700 12px ${FONT}`
+          ctx.fillText(timeOf(week, shift, day), cx, top + h - 11)
+        }
       })
     }
     top += h
@@ -252,11 +258,27 @@ export async function downloadScheduleImage(opts) {
     canvas = await renderScheduleCanvas({ ...opts, logo: false })
     blob = await canvasBlob(canvas)
   }
+  const label = weekLabel(opts.week.week_start).replace(/[^\d]+/g, '-').replace(/^-|-$/g, '')
+  const fileName = `raspored-${label}${opts.blank ? '-prazan' : ''}.png`
+
+  // Na telefonu se slika šalje kroz sistemski meni za deljenje, gde stoji
+  // „Sačuvaj sliku“ — tako završi u galeriji, a ne u fascikli sa preuzimanjima.
+  try {
+    const file = new File([blob], fileName, { type: 'image/png' })
+    const touch = typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0
+    if (touch && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file] })
+      return
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return // zatvorio je meni — nije greška
+    // inače se preuzima običnim putem
+  }
+
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  const label = weekLabel(opts.week.week_start).replace(/[^\d]+/g, '-').replace(/^-|-$/g, '')
   a.href = url
-  a.download = `raspored-${label}${opts.blank ? '-prazan' : ''}.png`
+  a.download = fileName
   document.body.appendChild(a)
   a.click()
   a.remove()

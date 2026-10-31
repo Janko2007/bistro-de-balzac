@@ -1460,16 +1460,6 @@ export default function ReportDetail() {
             alt="Slika izveštaja sa kase i aparata za kartice"
             className="max-h-full max-w-full rounded-lg object-contain"
           />
-          <button
-            type="button"
-            className={cx(
-              'absolute right-4 top-4 flex h-10 w-10 items-center justify-center',
-              'rounded-full bg-white/15 text-2xl text-white backdrop-blur',
-            )}
-            aria-label="Zatvori"
-          >
-            ×
-          </button>
         </div>
       )}
     </div>

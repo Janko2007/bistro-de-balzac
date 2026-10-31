@@ -9,9 +9,13 @@ import {
   SLOT_LABELS,
   addDays,
   createWeek,
-  deadlineLabel,
   deleteWeek,
+  hasCustomTime,
   hasMid,
+  joinTime,
+  splitTime,
+  timeOf,
+  withHours,
   fromLocalInput,
   loadPeople,
   loadSignups,
@@ -102,11 +106,21 @@ export default function ScheduleAdmin({ weekStart }) {
 
   const [cyr, setCyr] = usePersistentState('schedule.cyr', false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editTime, setEditTime] = useState(null) // { key: 'dan|smena', from, to }
   // Raspored i svaki dan posebno se otvaraju i zatvaraju. null = po podrazumevanom (objavljen → zatvoren).
   const [builderOpen, setBuilderOpen] = usePersistentState('schedule.builderOpen', null)
   const [openDays, setOpenDays] = usePersistentState('schedule.openDays', () => new Set())
   const [imageBusy, setImageBusy] = useState(false)
   const [signupsOpenList, setSignupsOpenList] = usePersistentState('schedule.signupsOpen', false)
+  // radnici čije su prijave otvorene (sve zatvoreno dok se ne klikne)
+  const [openPeople, setOpenPeople] = useState(() => new Set())
+  const togglePerson = (id) =>
+    setOpenPeople((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   const [loadOpen, setLoadOpen] = usePersistentState('schedule.loadOpen', false)
   const [budgetOpen, setBudgetOpen] = usePersistentState('schedule.budgetOpen', false)
 
@@ -172,6 +186,21 @@ export default function ScheduleAdmin({ weekStart }) {
     setWorking(false)
   }
 
+  /* Radno vreme za jedan dan: otvara se izbor sa trenutnim vremenom. */
+  function openTimeEditor(day, shift) {
+    const key = `${day}|${shift}`
+    if (editTime?.key === key) return setEditTime(null)
+    setEditTime({ key, ...splitTime(timeOf(week, shift, day)) })
+  }
+
+  async function saveTime(day, shift, value) {
+    await patchWeek(
+      { note: withHours(week, shift, day, value) },
+      value ? 'Radno vreme je sačuvano.' : 'Vraćeno je uobičajeno radno vreme.',
+    )
+    setEditTime(null)
+  }
+
   async function removeWeek() {
     setWorking(true)
     try {
@@ -232,9 +261,6 @@ export default function ScheduleAdmin({ weekStart }) {
                 )}
               >
                 <span className="block text-sm font-bold">{l.label}</span>
-                <span className={cx('block text-[11px]', newLayout === key ? 'text-stone-300' : 'text-stone-500')}>
-                  {l.hint}
-                </span>
               </button>
             ))}
           </div>
@@ -257,7 +283,6 @@ export default function ScheduleAdmin({ weekStart }) {
             </span>
             <span className="min-w-0">
               <span className="block text-sm font-semibold text-stone-800">Međusmena</span>
-              <span className="block text-[11px] text-stone-500">Jedna osoba, radnim danom 9–17, vikendom 12–20.</span>
             </span>
           </button>
 
@@ -315,9 +340,6 @@ export default function ScheduleAdmin({ weekStart }) {
       <Card>
         <CardHeader
           title={week.published ? 'Raspored je objavljen' : 'Raspored nije objavljen'}
-          subtitle={`${LAYOUTS[week.layout]?.label}${midOn ? ' + međusmena' : ''} · rok ${deadlineLabel(week.signup_deadline)} · ${
-            isOpen ? 'prijava otvorena' : 'prijava zatvorena'
-          }`}
         />
         <div className="space-y-3 p-4">
           {/* Izgled rasporeda: po jedna osoba ili po dvoje u smeni. */}
@@ -339,9 +361,6 @@ export default function ScheduleAdmin({ weekStart }) {
                   )}
                 >
                   <span className="block text-sm font-bold">{l.label}</span>
-                  <span className={cx('block text-[11px]', week.layout === key ? 'text-stone-300' : 'text-stone-500')}>
-                    {l.hint}
-                  </span>
                 </button>
               ))}
             </div>
@@ -370,9 +389,9 @@ export default function ScheduleAdmin({ weekStart }) {
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-semibold text-stone-800">Međusmena</span>
-                <span className="block text-[11px] text-stone-500">
-                  {midOn && midPlaced ? 'Prvo ukloni radnike iz međusmene.' : 'Jedna osoba, radnim danom 9–17, vikendom 12–20.'}
-                </span>
+                {midOn && midPlaced && (
+                  <span className="block text-[11px] text-stone-500">Prvo ukloni radnike iz međusmene.</span>
+                )}
               </span>
             </button>
           </div>
@@ -464,10 +483,7 @@ export default function ScheduleAdmin({ weekStart }) {
 
       {/* ---------- Raspored kao slika ---------- */}
       <Card>
-        <CardHeader
-          title="Raspored"
-          subtitle={week.published ? 'Ovako ga vide radnici' : 'Pregled — radnici ga ne vide dok ga ne objaviš'}
-        />
+        <CardHeader title="Raspored" />
         <div className="p-3">
           <ScheduleImage
             week={week}
@@ -572,9 +588,66 @@ export default function ScheduleAdmin({ weekStart }) {
                     <div key={shift} className="rounded-2xl bg-stone-50 p-2.5 ring-1 ring-inset ring-stone-200">
                       <p className="text-[12px] font-bold text-stone-700">
                         {SHIFT_INFO[shift].label}{' '}
-                        <span className="font-medium text-stone-400">{SHIFT_INFO[shift].time(day)}</span>
+                        <button
+                          type="button"
+                          onClick={() => openTimeEditor(day, shift)}
+                          aria-label={`Promeni radno vreme: ${SHIFT_INFO[shift].label}, ${DAY_NAMES[i]}`}
+                          className={cx(
+                            'rounded-md px-1.5 py-0.5 font-semibold tabular-nums underline decoration-dotted underline-offset-2 transition hover:bg-stone-200/70',
+                            hasCustomTime(week, shift, day) ? 'text-brand-700' : 'text-stone-400',
+                          )}
+                        >
+                          {timeOf(week, shift, day)}
+                        </button>
                         <span className="ml-2 font-medium text-stone-400">prijavljeno: {here.length}</span>
                       </p>
+
+                      {editTime?.key === `${day}|${shift}` && (
+                        <div className="mt-2 rounded-xl bg-white p-2.5 ring-1 ring-inset ring-stone-200">
+                          <p className="text-[11px] font-semibold text-stone-500">Radno vreme samo za ovaj dan</p>
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <Input
+                              type="time"
+                              value={editTime.from}
+                              onChange={(e) => setEditTime((t) => ({ ...t, from: e.target.value }))}
+                              className="min-w-0 flex-1"
+                              aria-label="Od"
+                            />
+                            <span className="text-stone-400">–</span>
+                            <Input
+                              type="time"
+                              value={editTime.to}
+                              onChange={(e) => setEditTime((t) => ({ ...t, to: e.target.value }))}
+                              className="min-w-0 flex-1"
+                              aria-label="Do"
+                            />
+                          </div>
+                          <div className="mt-2 flex flex-wrap justify-end gap-2">
+                            {hasCustomTime(week, shift, day) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="mr-auto"
+                                disabled={working}
+                                onClick={() => saveTime(day, shift, null)}
+                              >
+                                Uobičajeno
+                              </Button>
+                            )}
+                            <Button variant="secondary" size="sm" onClick={() => setEditTime(null)}>
+                              Otkaži
+                            </Button>
+                            <Button
+                              size="sm"
+                              loading={working}
+                              disabled={!editTime.from || !editTime.to}
+                              onClick={() => saveTime(day, shift, joinTime(editTime.from, editTime.to))}
+                            >
+                              Sačuvaj
+                            </Button>
+                          </div>
+                        </div>
+                      )}
 
                       <div className={cx('mt-1.5 grid gap-1.5', slotsOf(week, shift).length > 1 && 'sm:grid-cols-2')}>
                         {slotsOf(week, shift).map((slot) => {
@@ -675,24 +748,77 @@ export default function ScheduleAdmin({ weekStart }) {
           </span>
         </button>
         {signupsOpenList && (
-          <div className="flex flex-wrap gap-1.5 border-t border-stone-100 p-4">
+          <ul className="divide-y divide-stone-100 border-t border-stone-100">
             {people
               .filter((p) => p.role !== 'admin' || signedPeople.has(p.id))
               .map((p) => {
-                const n = signups.filter((s) => s.profile_id === p.id).length
+                const mine = signups
+                  .filter((s) => s.profile_id === p.id)
+                  .sort(
+                    (a, b) =>
+                      days.indexOf(a.day) - days.indexOf(b.day) ||
+                      Object.keys(SHIFT_INFO).indexOf(a.shift) - Object.keys(SHIFT_INFO).indexOf(b.shift),
+                  )
+                const n = mine.length
+                const expanded = openPeople.has(p.id)
                 return (
-                  <span
-                    key={p.id}
-                    className={cx(
-                      'rounded-full px-3 py-1.5 text-xs font-semibold',
-                      n > 0 ? 'bg-brand-50 text-brand-800 ring-1 ring-inset ring-brand-600/20' : 'bg-stone-100 text-stone-400',
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      onClick={() => togglePerson(p.id)}
+                      aria-expanded={expanded}
+                      disabled={n === 0}
+                      className={cx(
+                        'flex w-full items-center gap-2.5 px-4 py-3 text-left transition',
+                        expanded ? 'bg-stone-50' : n > 0 ? 'hover:bg-stone-50' : '',
+                      )}
+                    >
+                      <svg
+                        className={cx(
+                          'h-4 w-4 shrink-0 transition-transform',
+                          n > 0 ? 'text-stone-400' : 'text-stone-200',
+                          expanded && 'rotate-90',
+                        )}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M9 18l6-6-6-6" />
+                      </svg>
+                      <span className={cx('min-w-0 flex-1 truncate text-sm font-semibold', n > 0 ? 'text-stone-800' : 'text-stone-400')}>
+                        {p.full_name}
+                      </span>
+                      <span
+                        className={cx(
+                          'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums',
+                          n > 0 ? 'bg-brand-50 text-brand-800' : 'bg-stone-100 text-stone-400',
+                        )}
+                      >
+                        {n > 0 ? `${n} ${plural(n, 'smena')}` : 'nije se prijavio/la'}
+                      </span>
+                    </button>
+                    {expanded && n > 0 && (
+                      <ul className="space-y-1.5 bg-stone-50 px-4 pb-3 pl-11 pt-1">
+                        {mine.map((s) => (
+                          <li key={s.id} className="text-[13px] text-stone-700">
+                            <span className="font-semibold capitalize">{DAY_NAMES[days.indexOf(s.day)]}</span>{' '}
+                            <span className="tabular-nums text-stone-400">{shortDate(s.day)}</span>
+                            {' · '}
+                            {SHIFT_INFO[s.shift]?.label ?? s.shift}{' '}
+                            <span className="tabular-nums text-stone-400">{SHIFT_INFO[s.shift] && timeOf(week, s.shift, s.day)}</span>
+                            {s.note && <p className="mt-0.5 text-[12px] italic text-stone-500">„{s.note}“</p>}
+                          </li>
+                        ))}
+                      </ul>
                     )}
-                  >
-                    {p.full_name} · {n}
-                  </span>
+                  </li>
                 )
               })}
-          </div>
+          </ul>
         )}
       </Card>
       {/* ---------- Smene u nedelji (padajući meni) ---------- */}

@@ -72,10 +72,8 @@ export default function AboutApp() {
 
   return (
     <Card>
-      <h3 className="px-4 py-3.5 text-base font-extrabold tracking-tight text-stone-900">O aplikaciji</h3>
-
       {(
-        <div className="space-y-4 border-t border-stone-100 px-4 pb-5 pt-6">
+        <div className="space-y-4 px-4 py-6">
           {/* Logo */}
           <div className="flex flex-col items-center text-center">
             {ABOUT.logo && !logoFailed ? (

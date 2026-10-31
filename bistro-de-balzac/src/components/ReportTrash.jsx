@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { usePersistentState } from '../lib/persist'
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
-import { SHIFT_LABELS, errorMessage, formatDate, formatMoney } from '../lib/utils'
-import { Button, Card, CardHeader } from './ui'
+import { SHIFT_LABELS, cx, errorMessage, formatDate, formatMoney } from '../lib/utils'
+import { Button, Card } from './ui'
 
 /** Koliko dugo obrisan popis može da se vrati. */
 const KEEP_MS = 12 * 60 * 60 * 1000
@@ -27,6 +28,7 @@ function timeLeft(deletedAt) {
  */
 export default function ReportTrash({ onRestored }) {
   const toast = useToast()
+  const [open, setOpen] = usePersistentState('trash.open', false)
   const [rows, setRows] = useState([])
   const [names, setNames] = useState({})
   const [busy, setBusy] = useState(null)
@@ -88,8 +90,42 @@ export default function ReportTrash({ onRestored }) {
 
   return (
     <Card>
-      <CardHeader title="Obrisani popisi" subtitle="Mogu da se vrate 12 sati od brisanja" />
-      {missing ? (
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={cx(
+          'flex w-full items-center gap-2.5 px-4 py-3.5 text-left transition',
+          open ? 'bg-stone-100' : 'hover:bg-stone-50',
+        )}
+      >
+        <svg
+          className={cx('h-4 w-4 shrink-0 text-stone-400 transition-transform', open && 'rotate-90')}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M9 18l6-6-6-6" />
+        </svg>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-semibold tracking-tight text-stone-900">
+            Obrisani popisi
+          </span>
+          <span className="mt-0.5 block text-[13px] text-stone-500">
+            Mogu da se vrate 12 sati od brisanja
+          </span>
+        </span>
+        {rows.length > 0 && (
+          <span className="shrink-0 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-stone-500">
+            {rows.length}
+          </span>
+        )}
+      </button>
+      {!open ? null : missing ? (
         <p className="px-4 py-3.5 text-sm text-amber-800">
           Korpa još nije uključena u bazi — u Supabase-u pokreni SQL iz uputstva za ažuriranje.
         </p>

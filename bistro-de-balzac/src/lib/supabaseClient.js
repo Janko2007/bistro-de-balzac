@@ -12,12 +12,63 @@ if (!isSupabaseConfigured) {
   )
 }
 
+/**
+ * „Zapamti me“ na prijavi: uključeno (podrazumevano) čuva prijavu trajno,
+ * isključeno je čuva samo dok se aplikacija ne zatvori. Postojeće prijave
+ * ostaju gde jesu — čitaju se iz oba mesta.
+ */
+const REMEMBER_KEY = 'kafic-popis-remember'
+
+export function getRemember() {
+  try {
+    return localStorage.getItem(REMEMBER_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function setRemember(value) {
+  try {
+    localStorage.setItem(REMEMBER_KEY, value ? '1' : '0')
+  } catch {
+    /* bez trajnog skladišta — prijava ostaje samo u ovoj sesiji */
+  }
+}
+
+const authStorage = {
+  getItem: (key) => {
+    try {
+      return sessionStorage.getItem(key) ?? localStorage.getItem(key)
+    } catch {
+      return null
+    }
+  },
+  setItem: (key, value) => {
+    try {
+      const keep = getRemember()
+      ;(keep ? localStorage : sessionStorage).setItem(key, value)
+      ;(keep ? sessionStorage : localStorage).removeItem(key)
+    } catch {
+      /* skladište nedostupno */
+    }
+  },
+  removeItem: (key) => {
+    try {
+      sessionStorage.removeItem(key)
+      localStorage.removeItem(key)
+    } catch {
+      /* skladište nedostupno */
+    }
+  },
+}
+
 export const supabase = createClient(url ?? 'http://localhost', anonKey ?? 'public-anon-key', {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
     storageKey: 'kafic-popis-auth',
+    storage: authStorage,
   },
 })
 

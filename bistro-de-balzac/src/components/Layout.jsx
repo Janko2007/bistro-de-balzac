@@ -6,13 +6,11 @@ import { cx } from '../lib/utils'
 import { clearPersistedState } from '../lib/persist'
 import { deriveTheme, useThemeColor } from '../lib/theme'
 import Avatar from './Avatar'
-import { Button } from './ui'
 import InstallPrompt from './InstallPrompt'
 import AnnouncementGate from './AnnouncementGate'
 
 /* Vreme pravljenja verzije — upisuje ga Vite pri objavi (vidi vite.config.js).
    U razvoju te promenljive nema, pa stoji rezerva. */
-const BUILD_TIME = typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : 'razvojna'
 
 /* Ikone (inline SVG — bez dodatnih biblioteka) */
 const icons = {
@@ -62,13 +60,18 @@ function useScrollMemory() {
   const location = useLocation()
   const navType = useNavigationType()
   const positions = useRef(new Map())
+  // Glavne sekcije (donja navigacija) pamte mesto i kad im se vraćaš dodirom
+  // na njih, ne samo strelicom nazad — nastavljaš gde si stao.
+  const byPath = useRef(new Map())
 
   useEffect(() => {
     const key = location.key
-    const saved = positions.current.get(key)
+    const path = location.pathname
+    const isSection = !path.startsWith('/izvestaj')
+    const saved = positions.current.get(key) ?? (isSection ? byPath.current.get(path) : undefined)
 
     let frame = 0
-    if (navType === 'POP' && typeof saved === 'number') {
+    if (typeof saved === 'number' && (navType === 'POP' || isSection)) {
       // Lista se često tek učitava — skrol se pokušava dok stranica ne naraste
       // do pozicije na kojoj si stao (najviše oko dve sekunde).
       const startedAt = performance.now()
@@ -85,8 +88,9 @@ function useScrollMemory() {
     return () => {
       cancelAnimationFrame(frame)
       positions.current.set(key, window.scrollY)
+      if (isSection) byPath.current.set(path, window.scrollY)
     }
-  }, [location.key, navType])
+  }, [location.key, location.pathname, navType])
 }
 
 export default function Layout() {
@@ -188,7 +192,7 @@ export default function Layout() {
               <Avatar
                 name={profile?.full_name}
                 path={profile?.avatar_path}
-                className={cx('h-9 w-9 text-xs text-white', theme ? 'bg-white/20' : 'bg-ink-700')}
+                className={cx('h-9 w-9 text-xs text-white', isAdmin ? 'bg-violet-600' : theme ? 'bg-white/20' : 'bg-ink-700')}
               />
             </button>
 
@@ -198,22 +202,15 @@ export default function Layout() {
                 <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-stone-200 bg-white text-stone-900 shadow-xl">
                   <div className="border-b border-stone-100 px-4 py-3">
                     <p className="truncate text-sm font-bold">{profile?.full_name}</p>
-                    <p className="truncate text-xs text-stone-500">{profile?.email}</p>
-                    {/* Kad je verzija napravljena — da se vidi da li je stigla
-                        nova, ili pregledač još drži staru kopiju. */}
-                    <p className="mt-1 truncate text-[11px] text-stone-400">
-                      verzija {BUILD_TIME}
-                    </p>
                   </div>
                   <div className="p-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start"
+                    <button
+                      type="button"
                       onClick={handleSignOut}
+                      className="w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50 active:bg-rose-100"
                     >
                       Odjavi se
-                    </Button>
+                    </button>
                   </div>
                 </div>
               </>

@@ -147,10 +147,20 @@ function Viewer({ src, onClose }) {
         type="button"
         onClick={onClose}
         aria-label="Zatvori"
-        className="fixed right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-2xl leading-none text-white backdrop-blur transition hover:bg-white/30"
+        className="fixed right-3 top-3 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white text-stone-900 shadow-lg ring-1 ring-black/10 transition active:scale-95 hover:bg-stone-100"
         style={{ marginTop: 'env(safe-area-inset-top, 0px)' }}
       >
-        ×
+        <svg
+          className="h-5 w-5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.75"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
       </button>
 
       {/* m-auto na slici: kad je manja od ekrana stoji na sredini, kad je uvećana — pomera se */}

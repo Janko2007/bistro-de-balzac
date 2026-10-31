@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../context/AuthContext'
-import { APP_NAME } from '../lib/supabaseClient'
+import { ABOUT } from '../lib/about'
+import { APP_NAME, getRemember, setRemember } from '../lib/supabaseClient'
 import { errorMessage } from '../lib/utils'
 import { Button, Field, Input, Spinner } from '../components/ui'
 
@@ -14,6 +15,7 @@ export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [remember, setRememberState] = useState(() => getRemember())
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -43,6 +45,7 @@ export default function Login() {
     }
 
     setSubmitting(true)
+    setRemember(remember)
     const { error: signInError } = await signIn(username, password)
     setSubmitting(false)
 
@@ -107,6 +110,17 @@ export default function Login() {
             </div>
           </Field>
 
+          <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium text-stone-700">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRememberState(e.target.checked)}
+              disabled={submitting}
+              className="h-5 w-5 rounded border-stone-300 accent-brand-600"
+            />
+            Zapamti me
+          </label>
+
           {error && (
             <div className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm font-medium text-rose-700 ring-1 ring-inset ring-rose-200">
               {error}
@@ -118,6 +132,27 @@ export default function Login() {
           </Button>
         </form>
       </div>
+
+      {/* Diskretan potpis na dnu — isti nacrtani logo kao u „O aplikaciji“. */}
+      <a
+        href={ABOUT.website}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={ABOUT.name}
+        className="mx-auto mt-8 flex items-end gap-1.5 opacity-50 transition hover:opacity-80"
+      >
+        <span
+          aria-hidden="true"
+          className="block h-[9px] w-[18px] shrink-0 bg-[#3ec4b4]"
+          style={{ borderRadius: '18px 18px 0 0' }}
+        />
+        <span
+          aria-hidden="true"
+          className="text-[14px] font-extrabold leading-[0.78] tracking-[-0.04em] text-white"
+        >
+          {ABOUT.name.toLowerCase()}
+        </span>
+      </a>
     </div>
   )
 }

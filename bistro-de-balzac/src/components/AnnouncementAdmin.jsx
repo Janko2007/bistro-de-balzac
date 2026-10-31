@@ -15,6 +15,7 @@ import {
 } from '../lib/announcements'
 import { cx, errorMessage, formatDate, formatMoney, parseNumber } from '../lib/utils'
 import AnnouncementPopup from './AnnouncementPopup'
+import { composeBody } from './RichText'
 import { Button, Card, Field, Input, Modal, MoneyInput, Select, Textarea } from './ui'
 
 const SEND_KINDS = ['poruka', 'slavlje', 'dnevnica']
@@ -23,6 +24,7 @@ const EMPTY = {
   kind: 'poruka',
   target: '', // '' = svima
   title: '',
+  subtitle: '',
   body: '',
   icon: '',
   effect: 'bez',
@@ -49,6 +51,7 @@ export default function AnnouncementAdmin({ people }) {
   const [toRemove, setToRemove] = useState(null)
   const [preview, setPreview] = useState(null)
   const fileRef = useRef(null)
+  const bodyRef = useRef(null)
 
   const load = useCallback(async () => {
     const [list, counts] = await Promise.all([loadAll(), loadReadCounts()])
@@ -68,23 +71,43 @@ export default function AnnouncementAdmin({ people }) {
     setForm({ ...EMPTY, kind, effect: kind === 'slavlje' ? 'konfete' : 'bez' })
   }
 
+  /* B: označeni tekst se uvija u **…** (ponovnim klikom se skida). */
+  function boldSelection() {
+    const el = bodyRef.current
+    if (!el) return
+    const { selectionStart: a, selectionEnd: b, value } = el
+    if (a === b) return toast.error('Prvo označi reči koje hoćeš da podebljaš.')
+    const picked = value.slice(a, b)
+    const wrapped = picked.startsWith('**') && picked.endsWith('**') && picked.length > 4
+    const next = wrapped
+      ? value.slice(0, a) + picked.slice(2, -2) + value.slice(b)
+      : value.slice(0, a) + `**${picked}**` + value.slice(b)
+    set({ body: next })
+    const end = wrapped ? b - 4 : b + 4
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(a, end)
+    })
+  }
+
   /* Pregled: isti prozor kao kod radnika, ali ništa se ne šalje ni ne čuva. */
   function openPreview() {
     const f = form
     let title = f.title.trim()
-    let body = f.body.trim()
+    let main = f.body.trim()
     if (f.kind === 'dnevnica') {
       const amount = parseNumber(f.amount)
       if (!title) title = 'Povećanje dnevnice'
-      if (!body) body = `Tvoja dnevnica je povećana na ${formatMoney(amount)}. Hvala na trudu!`
+      if (!main) main = `Tvoja dnevnica je povećana na ${formatMoney(amount)}. Hvala na trudu!`
     }
+    const body = composeBody(f.subtitle, main)
     const photo = f.file ? URL.createObjectURL(f.file) : null
     setPreview({
       item: {
         id: `pregled-${Date.now()}`,
         title,
         body,
-        icon: f.icon.trim() || KINDS[f.kind].icon,
+        icon: '',
         effect: f.effect,
       },
       photo,
@@ -105,7 +128,7 @@ export default function AnnouncementAdmin({ people }) {
       if (!f.target) return toast.error('Izaberi radnika kome se menja dnevnica.')
       if (parseNumber(f.amount) <= 0) return toast.error('Unesi novi iznos dnevnice.')
     }
-    if (f.kind !== 'dnevnica' && !f.title.trim() && !f.body.trim() && !f.file) {
+    if (f.kind !== 'dnevnica' && !f.title.trim() && !f.subtitle.trim() && !f.body.trim() && !f.file) {
       return toast.error('Napiši bar naslov, poruku ili dodaj sliku.')
     }
 
@@ -113,12 +136,13 @@ export default function AnnouncementAdmin({ people }) {
     try {
       const amount = parseNumber(f.amount)
       let title = f.title.trim()
-      let body = f.body.trim()
+      let main = f.body.trim()
 
       if (f.kind === 'dnevnica') {
         if (!title) title = 'Povećanje dnevnice'
-        if (!body) body = `Tvoja dnevnica je povećana na ${formatMoney(amount)}. Hvala na trudu!`
+        if (!main) main = `Tvoja dnevnica je povećana na ${formatMoney(amount)}. Hvala na trudu!`
       }
+      const body = composeBody(f.subtitle, main)
 
       const image_path = f.file ? await uploadImage(f.file) : null
 
@@ -127,7 +151,7 @@ export default function AnnouncementAdmin({ people }) {
           kind: f.kind,
           title,
           body,
-          icon: f.icon.trim() || KINDS[f.kind].icon,
+          icon: '',
           image_path,
           effect: f.effect,
           target_profile_id: f.target || null,
@@ -215,7 +239,7 @@ export default function AnnouncementAdmin({ people }) {
                   onClick={() => openNew(k)}
                   className="rounded-full bg-stone-100 px-3 py-1.5 text-xs font-semibold text-stone-700 transition hover:bg-stone-200"
                 >
-                  {KINDS[k].icon} {KINDS[k].label}
+                  {KINDS[k].label}
                 </button>
               ))}
             </div>
@@ -227,9 +251,6 @@ export default function AnnouncementAdmin({ people }) {
                 {items.map((a) => (
                   <li key={a.id} className="px-4 py-2.5">
                     <div className="flex items-center gap-3">
-                      <span className="text-xl leading-none" aria-hidden="true">
-                        {a.icon}
-                      </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-bold text-stone-900">
                           {a.title || 'Obaveštenje'}
@@ -294,7 +315,7 @@ export default function AnnouncementAdmin({ people }) {
                     form.kind === k ? 'bg-ink text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200/70',
                   )}
                 >
-                  {KINDS[k].icon} {KINDS[k].label}
+                  {KINDS[k].label}
                 </button>
               ))}
             </div>
@@ -342,14 +363,32 @@ export default function AnnouncementAdmin({ people }) {
               <Input value={form.title} onChange={(e) => set({ title: e.target.value })} placeholder="npr. Sjajna večeras!" />
             </Field>
 
-            <Field label="Poruka">
+            <Field label="Podnaslov" hint="Opciono — manji red ispod naslova.">
+              <Input value={form.subtitle} onChange={(e) => set({ subtitle: e.target.value })} placeholder="npr. Za sve koji rade vikendom" />
+            </Field>
+
+            <div>
+              <span className="label">Tekst</span>
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={boldSelection}
+                  aria-label="Podebljaj označeni tekst"
+                  title="Podebljaj označeni tekst"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-stone-100 text-[15px] font-black text-stone-800 transition hover:bg-stone-200 active:scale-95"
+                >
+                  B
+                </button>
+                <span className="text-[11px] text-stone-400">Označi reči pa klikni B</span>
+              </div>
               <Textarea
-                rows={4}
+                ref={bodyRef}
+                rows={6}
                 value={form.body}
                 onChange={(e) => set({ body: e.target.value })}
                 placeholder={form.kind === 'dnevnica' ? 'Prazno = automatski tekst' : 'Šta želiš da im kažeš…'}
               />
-            </Field>
+            </div>
 
             {/* Slika */}
             <div>
@@ -381,7 +420,7 @@ export default function AnnouncementAdmin({ people }) {
               </div>
             </div>
 
-            {/* Efekat i znak */}
+            {/* Efekat */}
             <div>
               <span className="label">Efekat</span>
               <div className="grid grid-cols-3 gap-1.5">
@@ -402,21 +441,13 @@ export default function AnnouncementAdmin({ people }) {
               </div>
             </div>
 
-            <Field label="Znak" hint="Opciono — bilo koji emodži.">
-              <Input
-                value={form.icon}
-                onChange={(e) => set({ icon: [...e.target.value].slice(-2).join('') })}
-                placeholder={KINDS[form.kind].icon}
-                className="w-24 text-center text-2xl"
-              />
-            </Field>
 
             <div className="flex flex-wrap gap-2 pt-1">
               <Button type="button" variant="secondary" className="flex-1" disabled={working} onClick={() => setForm(null)}>
                 Otkaži
               </Button>
               <Button type="button" variant="secondary" className="flex-1" disabled={working} onClick={openPreview}>
-                👁 Pregled
+                Pregled
               </Button>
               <Button type="submit" className="w-full" loading={working}>
                 Pošalji
@@ -430,7 +461,6 @@ export default function AnnouncementAdmin({ people }) {
           item={preview.item}
           photo={preview.photo}
           hasImage={Boolean(preview.photo)}
-          heading={preview.heading}
           counter="pregled"
           buttonLabel="Zatvori pregled"
           onDismiss={closePreview}

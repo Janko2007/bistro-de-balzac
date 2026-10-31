@@ -30,19 +30,28 @@ function monthTitle(period) {
  * meseci. Izabrani period je narandžasta pločica, a onaj u toku je samo
  * obojen — bez okvira i linija, da meni bude čist.
  */
-export default function PeriodPicker({ period, onChange, className }) {
+export default function PeriodPicker({ period, onChange, className, since = '' }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef(null)
 
+  // `since` (YYYY-MM-DD): od kad je radnik u kolektivu — ranijih perioda nema.
   const months = useMemo(() => {
     const list = []
     let first = periodFromKey(`${currentPeriod().key.slice(0, 7)}-A`)
-    for (let i = 0; i < MONTHS; i += 1) {
+    const count = since
+      ? Math.min(
+          60,
+          (first.year - Number(since.slice(0, 4))) * 12 + (first.month - Number(since.slice(5, 7))) + 1,
+        )
+      : MONTHS
+    for (let i = 0; i < Math.max(count, 1); i += 1) {
       list.push({ a: first, b: shiftPeriod(first, 1) })
       first = shiftPeriod(first, -2) // prvi period prethodnog meseca
     }
     return list
-  }, [])
+  }, [since])
+
+  const beforeStart = (p) => Boolean(since) && p.to < since
 
   // Klik van menija ili Esc ga zatvara.
   useEffect(() => {
@@ -67,6 +76,7 @@ export default function PeriodPicker({ period, onChange, className }) {
   }
 
   const option = (p, text) => {
+    if (beforeStart(p)) return <span aria-hidden="true" />
     const selected = p.key === period.key
     const now = isOpenPeriod(p)
     return (

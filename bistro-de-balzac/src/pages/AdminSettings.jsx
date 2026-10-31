@@ -55,9 +55,7 @@ export default function AdminSettings() {
         <AdminItems embedded />
       </Group>
 
-      <Group title="O aplikaciji">
-        <AboutApp />
-      </Group>
+      <AboutApp />
     </div>
   )
 }

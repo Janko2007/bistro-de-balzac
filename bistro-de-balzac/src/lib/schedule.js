@@ -101,14 +101,68 @@ export const SHIFT_INFO = {
   druga: { label: 'II smena', short: 'Druga', roman: 'II', time: () => '15:30–00:00' },
 }
 
+/* ------------------------------------------------------------------ */
+/*  Radno vreme po danu                                                 */
+/*                                                                      */
+/*  Admin može da promeni vreme bilo koje smene (i međusmene) za baš    */
+/*  jedan dan. Čuva se u polju `note` nedelje kao {"hours": {...}}, pa  */
+/*  ne treba nova skripta za bazu.                                      */
+/* ------------------------------------------------------------------ */
+export function hoursMap(week) {
+  try {
+    const parsed = JSON.parse(week?.note ?? '')
+    return parsed && typeof parsed === 'object' && parsed.hours && typeof parsed.hours === 'object'
+      ? parsed.hours
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Vreme smene za dati dan: izabrano, a ako ga nema — uobičajeno. */
+export const timeOf = (week, shift, day) => hoursMap(week)[`${day}|${shift}`] || SHIFT_INFO[shift].time(day)
+
+/** Da li je vreme za taj dan promenjeno. */
+export const hasCustomTime = (week, shift, day) => Boolean(hoursMap(week)[`${day}|${shift}`])
+
+/** Novi tekst polja `note` sa upisanim (ili vraćenim na uobičajeno, kad je value prazno) vremenom. */
+export function withHours(week, shift, day, value) {
+  const hours = { ...hoursMap(week) }
+  const key = `${day}|${shift}`
+  if (value) hours[key] = value
+  else delete hours[key]
+  return Object.keys(hours).length > 0 ? JSON.stringify({ hours }) : null
+}
+
+/**
+ * Izbor vremena: dva polja <input type="time">. Iz teksta „7:00–15:30“ u
+ * { from: '07:00', to: '15:30' } i nazad u tekst.
+ */
+export function splitTime(text) {
+  const [a = '', b = ''] = String(text).split('–')
+  const fix = (s) => {
+    const m = s.trim().match(/^(\d{1,2}):(\d{2})$/)
+    return m ? `${m[1].padStart(2, '0')}:${m[2]}` : ''
+  }
+  return { from: fix(a), to: fix(b) }
+}
+
+export function joinTime(from, to) {
+  const show = (s) => {
+    const [h, m] = s.split(':')
+    return `${h === '00' ? '00' : String(Number(h))}:${m}`
+  }
+  return `${show(from)}–${show(to)}`
+}
+
 /**
  * Izgled rasporeda ima dva nezavisna izbora:
  *   • koliko je ljudi u smeni (`layout`): jedna osoba ili šanker + konobar
  *   • da li postoji međusmena (`with_mid`) — uvek jedna osoba
  */
 export const LAYOUTS = {
-  jedan: { label: 'Po jedna osoba', hint: 'Jedna osoba u smeni', slots: ['a'] },
-  dvoje: { label: 'Po dvoje u smeni', hint: 'Šanker i konobar', slots: ['sanker', 'konobar'] },
+  jedan: { label: 'Po jedna osoba u smeni', slots: ['a'] },
+  dvoje: { label: 'Po dvoje u smeni', slots: ['sanker', 'konobar'] },
 }
 
 export const SLOT_LABELS = { a: '', sanker: 'Šanker', konobar: 'Konobar' }
@@ -180,6 +234,17 @@ export async function createWeek({ weekStart, layout, withMid, deadline }) {
 export async function updateWeek(id, patch) {
   const { error } = await supabase.from('schedule_weeks').update(patch).eq('id', id)
   if (error) throw error
+}
+
+/** Sve nedelje pre date (ponedeljak), najnovije prvo — za brisanje starih rasporeda. */
+export async function loadPastWeeks(beforeWeekStart) {
+  const { data, error } = await supabase
+    .from('schedule_weeks')
+    .select('id, week_start')
+    .lt('week_start', beforeWeekStart)
+    .order('week_start', { ascending: false })
+  if (error) throw error
+  return data ?? []
 }
 
 export async function deleteWeek(id) {

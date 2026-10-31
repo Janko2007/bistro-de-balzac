@@ -5,6 +5,7 @@ import { useToast } from '../context/ToastContext'
 import {
   DAY_NAMES,
   SHIFT_INFO,
+  timeOf,
   addSignup,
   deadlineLabel,
   loadPeople,
@@ -241,7 +242,7 @@ export default function ScheduleWorker({ weekStart }) {
                           {shiftName(shift)}
                         </span>
                         <span className={cx('mt-0.5 block text-[11px] leading-tight', row ? 'text-white/80' : 'text-stone-400')}>
-                          {SHIFT_INFO[shift].time(day)}
+                          {timeOf(week, shift, day)}
                         </span>
                       </button>
 

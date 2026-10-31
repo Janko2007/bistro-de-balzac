@@ -80,12 +80,6 @@ export default function AnnouncementGate() {
 
   if (!current) return null
 
-  // O meni je reč (bedž, radnik meseca) — obraća mu se lično.
-  const aboutMe = current.subject_id === profile?.id
-  const heading =
-    aboutMe && (current.kind === 'bedz' || current.kind === 'radnik_meseca')
-      ? 'Čestitamo! 🎉'
-      : null
   const position = shown.current + 1
 
   return (
@@ -93,9 +87,8 @@ export default function AnnouncementGate() {
       item={current}
       photo={photo}
       hasImage={Boolean(current.image_path)}
-      heading={heading}
       counter={total.current > 1 ? `${Math.min(position, total.current)} / ${total.current}` : null}
-      buttonLabel={current.kind === 'poruka' ? 'Videh' : 'Super!'}
+      buttonLabel="U redu"
       onDismiss={dismiss}
     />
   )

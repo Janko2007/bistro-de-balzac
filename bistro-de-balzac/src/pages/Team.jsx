@@ -126,13 +126,21 @@ export default function Team({ bare = false }) {
                     zoomable
                     className={cx(
                       'h-10 w-10 shrink-0 text-sm',
-                      person.role === 'admin' ? 'bg-ink text-white' : 'bg-stone-200 text-stone-700',
+                      person.role === 'admin' ? 'bg-violet-600 text-white' : 'bg-stone-200 text-stone-700',
                     )}
                   />
 
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold text-stone-900">
                       {person.full_name}
+                      {person.role === 'admin' && (
+                        <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-violet-700">
+                          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8L12 2z" />
+                          </svg>
+                          Admin
+                        </span>
+                      )}
                       {person.id === profile?.id && (
                         <span className="ml-1.5 text-[11px] font-semibold text-sky-600">ti</span>
                       )}

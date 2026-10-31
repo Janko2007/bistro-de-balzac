@@ -5,7 +5,7 @@ import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { cx, errorMessage, formatDateTime } from '../lib/utils'
 import RuleText from './RuleText'
-import { Button, Card, CardHeader, Field, Input, Modal, Textarea } from './ui'
+import { Button, Card, Field, Input, Modal, Textarea } from './ui'
 
 /**
  * Pravila i obaveze — pravilnik, dnevne obaveze, obaveze šankera i konobara.
@@ -20,6 +20,7 @@ export default function RuleDocs({ editable = false }) {
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = usePersistentState('rules.open', () => new Set())
+  const [cardOpen, setCardOpen] = usePersistentState('rules.cardOpen', false)
 
   const [edit, setEdit] = useState(null) // { id?, title, body }
   const [removing, setRemoving] = useState(null) // dokument koji se briše
@@ -78,6 +79,7 @@ export default function RuleDocs({ editable = false }) {
 
     toast.success(edit.id ? 'Izmene su sačuvane.' : 'Dokument je dodat.')
     setOpen((prev) => new Set(prev).add(data.id))
+    setCardOpen(true)
     setEdit(null)
     load()
   }
@@ -121,23 +123,50 @@ export default function RuleDocs({ editable = false }) {
   return (
     <>
       <Card>
-        <CardHeader
-          title="Pravila i obaveze"
-          subtitle={editable ? 'Radnici ovo vide na ekranu Profil' : undefined}
-          action={
-            editable ? (
-              <Button
-                size="sm"
-                className="shrink-0"
-                onClick={() => setEdit({ title: '', body: '' })}
-              >
-                + Novi
-              </Button>
-            ) : null
-          }
-        />
+        {/* Cela kartica je padajući meni — zatvorena dok se ne klikne. */}
+        <button
+          type="button"
+          onClick={() => setCardOpen((v) => !v)}
+          aria-expanded={cardOpen}
+          className={cx(
+            'flex w-full items-center gap-2.5 px-4 py-3.5 text-left transition',
+            cardOpen ? 'bg-stone-100' : 'hover:bg-stone-50',
+          )}
+        >
+          <svg
+            className={cx('h-4 w-4 shrink-0 text-stone-400 transition-transform', cardOpen && 'rotate-90')}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+          <span className="min-w-0 flex-1">
+            <span className="block text-base font-extrabold tracking-tight text-stone-900">
+              Pravila i obaveze
+            </span>
+            {editable && (
+              <span className="block text-xs text-stone-400">Radnici ovo vide na ekranu Profil</span>
+            )}
+          </span>
+          <span className="shrink-0 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-stone-500">
+            {docs.length}
+          </span>
+        </button>
 
-        {docs.length === 0 ? (
+        {cardOpen && editable && (
+          <div className="flex justify-end border-t border-stone-100 px-4 py-2.5">
+            <Button size="sm" onClick={() => setEdit({ title: '', body: '' })}>
+              + Novi
+            </Button>
+          </div>
+        )}
+
+        {!cardOpen ? null : docs.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-stone-500">
             Još nema dokumenata. Klikni „+ Novi“ da dodaš prvi.
           </p>
