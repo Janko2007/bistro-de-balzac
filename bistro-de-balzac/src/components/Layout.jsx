@@ -192,7 +192,7 @@ export default function Layout() {
               <Avatar
                 name={profile?.full_name}
                 path={profile?.avatar_path}
-                className={cx('h-9 w-9 text-xs text-white', isAdmin ? 'bg-violet-600' : theme ? 'bg-white/20' : 'bg-ink-700')}
+                className={cx('h-9 w-9 text-xs text-white', theme ? 'bg-white/20' : 'bg-ink-700')}
               />
             </button>
 

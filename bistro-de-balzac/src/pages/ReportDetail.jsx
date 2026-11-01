@@ -1228,7 +1228,13 @@ export default function ReportDetail() {
 
       {!isAdmin && isOwner && report.status === 'vracen' && (
         <div className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-inset ring-rose-200">
-          Admin je vratio ovaj popis na ispravku. Pošalji novi, ispravan popis za ovu smenu.
+          <p>Admin je vratio ovaj popis na ispravku. Ispravi ga, dodaj sliku ako treba i pošalji ponovo.</p>
+          <Button
+            className="mt-3 w-full"
+            onClick={() => navigate(`/novi-popis?izvestaj=${report.id}`)}
+          >
+            Ispravi popis
+          </Button>
         </div>
       )}
 
