@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { usePersistentState } from '../lib/persist'
 import { supabase } from '../lib/supabaseClient'
@@ -24,6 +25,7 @@ const FILTERS = [
  */
 export default function MyReportsFold() {
   const toast = useToast()
+  const { profile } = useAuth()
 
   const [open, setOpen] = usePersistentState('myreports.open', false)
   const [search, setSearch] = usePersistentState('myreports.search', '')
@@ -50,16 +52,19 @@ export default function MyReportsFold() {
   }, [filter, dateSearch])
 
   // Koliko ih ukupno ima — za broj na zaglavlju.
+  // Samo smene u kojima je radnik trenutno upisan: ko je izašao ili je izbačen, one ne vidi.
   useEffect(() => {
+    if (!profile?.id) return
     supabase
       .from('report_summary')
       .select('id', { count: 'exact', head: true })
+      .contains('staff_ids', [profile.id])
       .then(({ count }) => setTotal(count ?? 0))
-  }, [])
+  }, [profile?.id])
 
   // Učitava se tek kad se red otvori.
   useEffect(() => {
-    if (!open) return undefined
+    if (!open || !profile?.id) return undefined
     let active = true
     setLoading(true)
 
@@ -68,6 +73,7 @@ export default function MyReportsFold() {
       .select('*', { count: 'exact' })
       .order('report_date', { ascending: false })
       .order('created_at', { ascending: false })
+      .contains('staff_ids', [profile.id])
       .range(0, limit - 1)
 
     if (filter) query = query.eq('status', filter)
@@ -85,7 +91,7 @@ export default function MyReportsFold() {
     return () => {
       active = false
     }
-  }, [open, limit, filter, dateSearch, toast])
+  }, [open, limit, filter, dateSearch, toast, profile?.id])
 
   const remaining = Math.max(0, found - reports.length)
 

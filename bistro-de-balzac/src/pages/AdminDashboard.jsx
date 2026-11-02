@@ -17,6 +17,7 @@ import {
   StatRow,
 } from '../components/ui'
 import ReportListItem from '../components/ReportListItem'
+import { displayNames } from '../lib/scheduleImage'
 import ReportPicker from '../components/ReportPicker'
 import ReportTrash from '../components/ReportTrash'
 import AdminDeposits from './AdminDeposits'
@@ -42,8 +43,29 @@ const QUICK_RANGES = [
   { label: 'Juče i danas', from: () => daysAgoISO(1), to: () => todayISO() },
   { label: '7 dana', from: () => daysAgoISO(6), to: () => todayISO() },
   { label: '30 dana', from: () => daysAgoISO(29), to: () => todayISO() },
-  { label: 'Tekući mesec', from: () => `${todayISO().slice(0, 7)}-01`, to: () => todayISO() },
+  { label: 'Tekući mesec', from: () => thisMonth().from, to: () => thisMonth().to, month: true },
+  { label: 'Prošli mesec', from: () => prevMonth().from, to: () => prevMonth().to, month: true },
 ]
+
+/** Prvi i poslednji dan meseca u kojem smo sada (YYYY-MM-DD) — ceo mesec, ne samo do danas. */
+function thisMonth() {
+  const [y, m] = todayISO().split('-').map(Number)
+  const last = new Date(y, m, 0).getDate()
+  const mm = String(m).padStart(2, '0')
+  const dd = String(last).padStart(2, '0')
+  return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${dd}` }
+}
+
+/** Prvi i poslednji dan prošlog meseca (YYYY-MM-DD). */
+function prevMonth() {
+  const [y, m] = todayISO().split('-').map(Number)
+  const py = m === 1 ? y - 1 : y
+  const pm = m === 1 ? 12 : m - 1
+  const last = new Date(py, pm, 0).getDate()
+  const mm = String(pm).padStart(2, '0')
+  const dd = String(last).padStart(2, '0')
+  return { from: `${py}-${mm}-01`, to: `${py}-${mm}-${dd}` }
+}
 
 
 export default function AdminDashboard() {
@@ -173,15 +195,18 @@ export default function AdminDashboard() {
   )
 
   /** Isto, ali kao objekti — oznaka „Među“ se na listi crta pored imena. */
+  // Samo ime; ako ih ima dva ista, uz ime ide i početno slovo prezimena.
+  const shortById = useMemo(() => displayNames(nameById), [nameById])
   const staffOf = useCallback(
     (report) => {
       const mid = midByDate.get(report.report_date)
       return (report.staff_ids ?? [])
-        .map((wid) => ({ name: nameById.get(wid), mid: !!mid?.has(wid) }))
+        .map((wid) => ({ name: shortById.get(wid), mid: !!mid?.has(wid) }))
         .filter((s) => s.name)
-        .sort((a, b) => a.name.localeCompare(b.name))
+        // Prvo oni koji su radili smenu, pa na kraju oni sa međusmenom.
+        .sort((a, b) => Number(a.mid) - Number(b.mid) || a.name.localeCompare(b.name))
     },
-    [nameById, midByDate],
+    [shortById, midByDate],
   )
 
   /**
@@ -424,8 +449,10 @@ export default function AdminDashboard() {
 
         {filtersOpen && (
           <div className="space-y-3 border-t border-stone-200 p-4">
-            <div className="flex flex-wrap gap-2">
-              {QUICK_RANGES.map((range) => {
+            <div className="space-y-2 md:flex md:flex-wrap md:gap-2 md:space-y-0">
+              {[QUICK_RANGES.slice(0, 3), QUICK_RANGES.slice(3)].map((group, gi) => (
+                <div key={gi} className="flex flex-nowrap gap-1.5 md:contents">
+              {group.map((range) => {
                 const active = from === range.from() && to === range.to()
                 return (
                   <button
@@ -433,7 +460,7 @@ export default function AdminDashboard() {
                     type="button"
                     onClick={() => applyQuickRange(range)}
                     className={cx(
-                      'rounded-full px-3.5 py-1.5 text-sm font-semibold transition ring-1 ring-inset',
+                      'whitespace-nowrap rounded-full px-2.5 py-1.5 text-[13px] font-semibold transition ring-1 ring-inset md:px-3.5 md:text-sm',
                       active
                         ? 'bg-ink text-white ring-ink'
                         : 'bg-white text-stone-700 ring-stone-300 hover:bg-stone-50',
@@ -443,6 +470,8 @@ export default function AdminDashboard() {
                   </button>
                 )
               })}
+                </div>
+              ))}
             </div>
 
             {/* Proizvoljan period — polja govore sama za sebe, bez naslova. */}
@@ -455,7 +484,6 @@ export default function AdminDashboard() {
                   type="date"
                   value={to}
                   min={from}
-                  max={todayISO()}
                   onChange={(e) => setTo(e.target.value)}
                 />
               </Field>

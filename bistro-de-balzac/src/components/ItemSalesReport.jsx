@@ -241,10 +241,10 @@ export default function ItemSalesReport({ items, categories }) {
           <path d="M9 18l6-6-6-6" />
         </svg>
         <span className="min-w-0 flex-1">
-          <span className="block text-[15px] font-semibold tracking-tight text-stone-900">
+          <span className="block text-base font-extrabold tracking-tight text-stone-900">
             Prodaja po artiklima
           </span>
-          <span className="mt-0.5 block truncate text-[13px] text-stone-500">
+          <span className="block truncate text-xs text-stone-400">
             {formatMonth(month)} · {countLabel(shiftCount, 'smena')}
           </span>
         </span>

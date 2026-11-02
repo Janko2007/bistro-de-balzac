@@ -102,10 +102,12 @@ export default function MyEarnings() {
   /* Uslovi rada (ranije ispod imena): dnevnica ili plata, procenat, u timu od. */
   const percent = Number(profile?.percent ?? 0)
   const terms = [
-    profile?.pay_model === 'plata'
+    calc.model === 'plata'
       ? `plata ${formatMoney(profile?.monthly_salary, false)}`
-      : `dnevnica ${formatMoney(profile?.daily_wage, false)}`,
-    percent > 0 ? `${percent}%` : null,
+      : calc.model === 'procenat'
+        ? null
+        : `dnevnica ${formatMoney(profile?.daily_wage, false)}`,
+    percent > 0 ? `${percent}%${calc.model === 'procenat' ? ' od pazara' : ''}` : null,
   ]
     .filter(Boolean)
     .join(' · ')

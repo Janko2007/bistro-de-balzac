@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Badge } from './ui'
+import MidMark from './MidMark'
 import {
   SHIFT_SHORT,
   SHIFT_STYLES,
@@ -96,20 +97,16 @@ export default function ReportListItem({
           <span className="flex min-w-0 items-center gap-1.5">
             <ShiftTag shift={report.shift} />
             {showAuthor && (
-              <span className="min-w-0 truncate text-[13.5px] font-semibold text-stone-900">
+              <span className="min-w-0 text-[13.5px] font-semibold leading-tight text-stone-900">
                 {staffNames.length > 0
                   ? staffNames.map((s, i) => {
                       const name = typeof s === 'string' ? s : s.name
                       const mid = typeof s === 'string' ? false : s.mid
                       return (
-                        <span key={`${name}-${i}`}>
-                          {i > 0 && ', '}
+                        <span key={`${name}-${i}`} className="whitespace-nowrap">
                           {name}
-                          {mid && (
-                            <span className="ml-1 rounded-md bg-brand-100 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-brand-800">
-                              Među
-                            </span>
-                          )}
+                          {mid && <MidMark className="ml-1 align-middle" />}
+                          {i < staffNames.length - 1 && ', '}
                         </span>
                       )
                     })

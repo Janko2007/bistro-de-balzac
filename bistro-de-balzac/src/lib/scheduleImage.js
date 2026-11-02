@@ -5,10 +5,10 @@ import { DAY_NAMES, SHIFT_INFO, SLOT_LABELS, hasCustomTime, timeOf, shiftsOf, sh
  * dani gore, smene levo. Crta se na canvas-u u pregledaču; ništa se ne šalje
  * na server.
  */
-const PAD = 18
-const LABEL_W = 118
-const DAY_W = 156
-const HEAD_H = 92
+const PAD = 14
+const LABEL_W = 108
+const DAY_W = 134
+const HEAD_H = 76
 const SCALE = 2 // dvostruka oštrina, da slika bude jasna i kad se uveća
 const FONT = "'Inter', 'Segoe UI', Arial, sans-serif"
 
@@ -62,7 +62,7 @@ function roundRect(ctx, x, y, w, h, r) {
 
 function rowHeight(week, shift) {
   const n = slotsOf(week, shift).length
-  return n > 1 ? 112 : shift === 'medjusmena' ? 104 : 92
+  return n > 1 ? 100 : shift === 'medjusmena' ? 96 : 74
 }
 
 /**
@@ -157,7 +157,7 @@ export async function renderScheduleCanvas({ week, slots, names, cyr = false, bl
 
   // logo gore levo
   if (logoImg) {
-    const size = 76
+    const size = 62
     ctx.save()
     roundRect(ctx, X0 + (LABEL_W - size) / 2, Y0 + (HEAD_H - size) / 2, size, size, 16)
     ctx.clip()
@@ -169,11 +169,11 @@ export async function renderScheduleCanvas({ week, slots, names, cyr = false, bl
   days.forEach((day, i) => {
     const cx = X0 + LABEL_W + i * DAY_W + DAY_W / 2
     ctx.fillStyle = INK
-    ctx.font = `700 19px ${FONT}`
+    ctx.font = `800 20px ${FONT}`
     ctx.fillText(t(DAY_NAMES[i]), cx, Y0 + HEAD_H / 2 - 8)
     ctx.fillStyle = MUTED
-    ctx.font = `500 13px ${FONT}`
-    ctx.fillText(shortDate(day), cx, Y0 + HEAD_H / 2 + 14)
+    ctx.font = `700 13px ${FONT}`
+    ctx.fillText(shortDate(day), cx, Y0 + HEAD_H / 2 + 13)
   })
 
   // smene
@@ -186,22 +186,40 @@ export async function renderScheduleCanvas({ week, slots, names, cyr = false, bl
     const lx = X0 + LABEL_W / 2
 
     if (shift === 'medjusmena') {
+      // Naslov i četiri kratka reda (naziv dana, pa vreme) — uvek staju u kolonu,
+      // i latinicom i ćirilicom.
+      const fit = (text, weight, size, maxW) => {
+        let px = size
+        ctx.font = `${weight} ${px}px ${FONT}`
+        while (px > 8 && ctx.measureText(text).width > maxW) {
+          px -= 0.5
+          ctx.font = `${weight} ${px}px ${FONT}`
+        }
+      }
+      const maxW = LABEL_W - 16
       ctx.fillStyle = INK
-      ctx.font = `700 16px ${FONT}`
-      ctx.fillText(t('Međusmena'), lx, mid - 14)
-      ctx.fillStyle = MUTED
-      ctx.font = `500 11px ${FONT}`
-      ctx.fillText(`${t('radni dani')} 9:00–17:00`, lx, mid + 6)
-      ctx.fillText(`${t('vikend')} 12:00–20:00`, lx, mid + 22)
-    } else {
+      const title = t('Međusmena')
+      fit(title, 800, 16, maxW)
+      ctx.fillText(title, lx, mid - 31)
+      const rows = [
+        [t('radni dani'), 800, INK, mid - 11],
+        ['9:00–17:00', 700, MUTED, mid + 3],
+        [t('vikend'), 800, INK, mid + 22],
+        ['12:00–20:00', 700, MUTED, mid + 36],
+      ]
+      rows.forEach(([text, weight, color, y]) => {
+        ctx.fillStyle = color
+        fit(text, weight, 11.5, maxW)
+        ctx.fillText(text, lx, y)
+      })    } else {
       ctx.fillStyle = BRAND
       ctx.font = `800 28px ${FONT}`
       ctx.fillText(info.roman, lx, mid - 17)
       ctx.fillStyle = INK
-      ctx.font = `700 14px ${FONT}`
+      ctx.font = `800 14px ${FONT}`
       ctx.fillText(t('smena'), lx, mid + 6)
       ctx.fillStyle = MUTED
-      ctx.font = `500 12px ${FONT}`
+      ctx.font = `700 12px ${FONT}`
       ctx.fillText(info.time(), lx, mid + 24)
     }
 
@@ -217,17 +235,17 @@ export async function renderScheduleCanvas({ week, slots, names, cyr = false, bl
           const role = keys.length > 1 && SLOT_LABELS[slot] ? t(SLOT_LABELS[slot]) : null
           if (role) {
             ctx.fillStyle = MUTED
-            ctx.font = `700 10px ${FONT}`
+            ctx.font = `800 10px ${FONT}`
             ctx.fillText(role.toUpperCase(), cx, cy - 12)
           }
           ctx.fillStyle = INK
-          ctx.font = `600 19px ${FONT}`
+          ctx.font = `800 21px ${FONT}`
           ctx.fillText(name, cx, role ? cy + 7 : cy)
         })
         // Vreme se piše u polju samo kad je za taj dan drugačije od uobičajenog.
         if (hasCustomTime(week, shift, day)) {
           ctx.fillStyle = BRAND
-          ctx.font = `700 12px ${FONT}`
+          ctx.font = `800 12px ${FONT}`
           ctx.fillText(timeOf(week, shift, day), cx, top + h - 11)
         }
       })

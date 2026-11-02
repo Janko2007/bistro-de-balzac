@@ -12,6 +12,7 @@ import {
   monthLabel,
   saveWorkerBadges,
 } from '../lib/badges'
+import { payModeOf, payPayload } from '../lib/payform'
 import { addPosition, isTrainee, joinPositions, loadPositions, parsePositions } from '../lib/positions'
 import { currentPeriod, periodLabel } from '../lib/payperiod'
 import AnnouncementAdmin from '../components/AnnouncementAdmin'
@@ -77,48 +78,62 @@ const emptyBadge = { name: '', icon: '🏅', description: '', requirement: '' }
  * radnik radio u obračunskom periodu.
  */
 function PayFields({ form, setForm }) {
-  const plata = form.pay_model === 'plata'
+  const mode = form.pay_model
   const set = (patch) => setForm((f) => ({ ...f, ...patch }))
 
+  const modes = [
+    { value: 'dnevnica', label: 'Dnevnica', hint: 'fiksno po danu', icon: '📅' },
+    { value: 'plata', label: 'Plata', hint: 'mesečno', icon: '💼' },
+    { value: 'procenat', label: 'Procenat', hint: 'od pazara', icon: '％' },
+  ]
+
   return (
-    <div className="space-y-3 rounded-xl border border-stone-200 bg-stone-50 p-3.5">
+    <div className="space-y-3 rounded-2xl border border-stone-200 bg-stone-50 p-3.5">
       <div>
         <span className="label">Način plaćanja</span>
-        <div className="flex gap-2">
-          {[
-            ['dnevnica', 'Dnevnica', 'po smeni'],
-            ['plata', 'Plata', 'mesečno'],
-          ].map(([value, label, hint]) => (
+        <div className="grid grid-cols-3 gap-2">
+          {modes.map((m) => (
             <button
-              key={value}
+              key={m.value}
               type="button"
-              onClick={() => set({ pay_model: value })}
-              aria-pressed={form.pay_model === value}
+              onClick={() => set({ pay_model: m.value })}
+              aria-pressed={mode === m.value}
               className={cx(
-                'flex-1 rounded-xl border px-3 py-2.5 text-left transition',
-                form.pay_model === value
-                  ? 'border-brand-500 bg-brand-50'
+                'rounded-xl border px-2 py-2.5 text-center transition',
+                mode === m.value
+                  ? 'border-brand-500 bg-brand-50 ring-1 ring-inset ring-brand-500/30'
                   : 'border-stone-200 bg-white hover:bg-stone-50',
               )}
             >
-              <span className="block text-sm font-bold text-stone-900">{label}</span>
-              <span className="block text-[11px] text-stone-500">{hint}</span>
+              <span className="block text-base leading-none" aria-hidden="true">
+                {m.icon}
+              </span>
+              <span className="mt-1 block text-[13px] font-bold text-stone-900">{m.label}</span>
+              <span className="block text-[10.5px] text-stone-500">{m.hint}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {plata ? (
+      {mode === 'plata' && (
         <Field label="Mesečna plata" hint="Za pola meseca ide polovina.">
           <MoneyInput value={form.monthly_salary} onChange={(v) => set({ monthly_salary: v })} />
         </Field>
-      ) : (
-        <Field label="Dnevnica">
+      )}
+      {mode === 'dnevnica' && (
+        <Field label="Dnevnica" hint="Međusmena u dve smene istog dana je jedna dnevnica.">
           <MoneyInput value={form.daily_wage} onChange={(v) => set({ daily_wage: v })} />
         </Field>
       )}
 
-      <Field label="Procenat od pazara" hint="Opciono.">
+      <Field
+        label={mode === 'procenat' ? 'Procenat od pazara' : 'Dodatni procenat od pazara'}
+        hint={
+          mode === 'procenat'
+            ? 'Radnik prima samo ovaj procenat od pazara smena koje radi.'
+            : 'Opciono — ide povrh osnove.'
+        }
+      >
         <div className="relative">
           <Input
             type="number"
@@ -135,6 +150,8 @@ function PayFields({ form, setForm }) {
           </span>
         </div>
       </Field>
+
+
     </div>
   )
 }
@@ -334,6 +351,9 @@ export default function AdminWorkers() {
   const [payoutToRemove, setPayoutToRemove] = useState(null) // id stavke koja se briše
   const [showInactive, setShowInactive] = usePersistentState('workers.showInactive', false)
   const [showAllWorkers, setShowAllWorkers] = usePersistentState('workers.showAllWorkers', false)
+  // Strelice za redosled se vide tek kad se klikne „Redosled“.
+  const [reorder, setReorder] = useState(false)
+  // Strelice za redosled se vide tek kad se klikne 
   // { reportId, value } — smena kojoj se upravo menja iznos dnevnice
   const [wageRow, setWageRow] = useState(null)
 
@@ -528,7 +548,9 @@ export default function AdminWorkers() {
           // Osnova: dnevnica po danu ili mesečna plata, plus procenat ako ga ima.
           (calc.model === 'plata'
             ? `${formatMoney(calc.salary, false)}/mes`
-            : `${formatMoney(calc.wage, false)}/dan`) +
+            : calc.model === 'procenat'
+              ? 'samo procenat'
+              : `${formatMoney(calc.wage, false)}/dan`) +
             (calc.model === 'dnevnica' && calc.reduced > 0
               ? ` (${calc.reduced} umanjeno)`
               : '') +
@@ -673,7 +695,7 @@ export default function AdminWorkers() {
       position: person.position ?? '',
       training_access: person.training_access === 'uredjuje' ? 'uredjuje' : 'gleda',
       hidden_from_team: person.hidden_from_team === true,
-      pay_model: person.pay_model === 'plata' ? 'plata' : 'dnevnica',
+      pay_model: payModeOf(person),
       daily_wage: String(person.daily_wage ?? ''),
       monthly_salary: String(person.monthly_salary ?? ''),
       percent: Number(person.percent) ? String(person.percent) : '',
@@ -687,6 +709,9 @@ export default function AdminWorkers() {
 
     if (name.split(' ').length < 2) return toast.error('Unesi ime i prezime.')
     if (form.password.length < 6) return toast.error('Lozinka mora imati bar 6 karaktera.')
+    if (form.pay_model === 'procenat' && parseNumber(form.percent) <= 0) {
+      return toast.error('Upiši procenat od pazara.')
+    }
 
     setWorking(true)
     const { data, error } = await callFunction({
@@ -695,10 +720,7 @@ export default function AdminWorkers() {
       phone: form.phone.trim(),
       password: form.password,
       role: form.role,
-      pay_model: form.pay_model,
-      daily_wage: parseNumber(form.daily_wage),
-      monthly_salary: parseNumber(form.monthly_salary),
-      percent: parseNumber(form.percent),
+      ...payPayload(form, parseNumber),
     })
     setWorking(false)
 
@@ -725,16 +747,16 @@ export default function AdminWorkers() {
     const person = modal.person
     const name = form.full_name.trim().replace(/\s+/g, ' ')
     if (!name) return toast.error('Unesi ime i prezime.')
+    if (form.pay_model === 'procenat' && parseNumber(form.percent) <= 0) {
+      return toast.error('Upiši procenat od pazara.')
+    }
 
     setWorking(true)
     const payload = {
       full_name: name,
       phone: form.phone.trim() || null,
       position: form.position.trim(),
-      pay_model: form.pay_model === 'plata' ? 'plata' : 'dnevnica',
-      daily_wage: parseNumber(form.daily_wage),
-      monthly_salary: parseNumber(form.monthly_salary),
-      percent: parseNumber(form.percent),
+      ...payPayload(form, parseNumber),
     }
     // Dozvola za obuku se upisuje samo onome ko je na obuci (skripta -23).
     if (isTrainee(form.position)) payload.training_access = form.training_access
@@ -1102,12 +1124,12 @@ export default function AdminWorkers() {
         'px-4 py-3 lg:border-b lg:border-stone-100 lg:[&:nth-child(odd)]:border-r',
         !person.is_active && 'opacity-60',
         // Telefon prikazuje prva tri radnika, računar prva četiri.
-        person.is_active && index === 3 && !showAllWorkers && 'hidden lg:block',
+        person.is_active && index === 3 && !showAllWorkers && !reorder && 'hidden lg:block',
       )}
     >
       <div className="flex items-start gap-3">
         {/* Redosled zadaje admin — najvažniji radnici na vrh. */}
-        {person.is_active && activeRows.length > 1 && (
+        {reorder && person.is_active && activeRows.length > 1 && (
           <div className="flex shrink-0 flex-col gap-0.5 pt-0.5">
             <button
               type="button"
@@ -1167,14 +1189,33 @@ export default function AdminWorkers() {
             {person.position?.trim() ? `${person.position.trim()} · ` : ''}
             {calc.model === 'plata'
               ? `plata ${formatMoney(calc.salary, false)}`
-              : `dnevnica ${formatMoney(calc.wage, false)}`}
-            {calc.percent > 0 ? ` · ${formatQty(calc.percent)}%` : ''}
+              : calc.model === 'procenat'
+                ? `${formatQty(calc.percent)}% od pazara`
+                : `dnevnica ${formatMoney(calc.wage, false)}`}
+            {calc.percent > 0 && calc.model !== 'procenat' ? ` · ${formatQty(calc.percent)}%` : ''}
           </p>
+
+          {/* Bedževi samo kao znaci — ime se vidi kad se zadrži miš, a ceo
+              spisak je u „Bedževi“. */}
+          {badgesOf(person.id).length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {badgesOf(person.id).map((b) => (
+                <span
+                  key={b.id}
+                  title={b.name}
+                  aria-label={b.name}
+                  className="text-base leading-none"
+                >
+                  {b.icon}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Radno iskustvo — radnik ga upisuje sam, vidi ga samo admin. Skriveno
               dok se ne klikne „više“, da spisak ostane kratak. */}
           {details.get(person.id) && (
-            <div className="mt-0.5">
+            <div className="mt-1">
               <button
                 type="button"
                 onClick={() =>
@@ -1198,23 +1239,6 @@ export default function AdminWorkers() {
                   {details.get(person.id)}
                 </p>
               )}
-            </div>
-          )}
-
-          {/* Bedževi samo kao znaci — ime se vidi kad se zadrži miš, a ceo
-              spisak je u „Bedževi“. */}
-          {badgesOf(person.id).length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {badgesOf(person.id).map((b) => (
-                <span
-                  key={b.id}
-                  title={b.name}
-                  aria-label={b.name}
-                  className="text-base leading-none"
-                >
-                  {b.icon}
-                </span>
-              ))}
             </div>
           )}
         </div>
@@ -1378,14 +1402,26 @@ export default function AdminWorkers() {
         <CardHeader
           title="Radnici"
           action={
-            <Button size="sm" className="shrink-0" onClick={openNew}>
-              + Novi nalog
-            </Button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {activeRows.length > 1 && (
+                <Button
+                  variant={reorder ? 'primary' : 'secondary'}
+                  size="sm"
+                  onClick={() => setReorder((v) => !v)}
+                  aria-pressed={reorder}
+                >
+                  {reorder ? 'Gotovo' : 'Redosled'}
+                </Button>
+              )}
+              <Button size="sm" onClick={openNew}>
+                + Novi nalog
+              </Button>
+            </div>
           }
         />
 
         <div className="divide-y divide-stone-100 lg:grid lg:grid-cols-2 lg:divide-y-0">
-          {(showAllWorkers ? activeRows : activeRows.slice(0, 4)).map(workerRow)}
+          {(showAllWorkers || reorder ? activeRows : activeRows.slice(0, 4)).map(workerRow)}
         </div>
 
         {activeRows.length > 3 && (
@@ -2223,6 +2259,24 @@ export default function AdminWorkers() {
                   {formatMoney(fresh.base, false)}
                 </p>
               </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-2xl bg-brand-600 px-4 py-3.5 text-white">
+                <div>
+                  <p className="eyebrow text-white/80">
+                    {fresh.balance < 0 ? 'Pretplaćeno' : 'Ukupno za isplatu'}
+                  </p>
+                  {(fresh.fromPercent > 0 || fresh.bonus > 0 || fresh.paid > 0) && (
+                    <p className="mt-0.5 text-[11px] text-white/70">
+                      {fresh.fromPercent > 0 && `+ ${formatMoney(fresh.fromPercent, false)} procenat `}
+                      {fresh.bonus > 0 && `+ ${formatMoney(fresh.bonus, false)} bonusi `}
+                      {fresh.paid > 0 && `− ${formatMoney(fresh.paid, false)} već isplaćeno`}
+                    </p>
+                  )}
+                </div>
+                <p className="text-xl font-extrabold tabular-nums">
+                  {formatMoney(Math.abs(fresh.balance), false)}
+                </p>
+              </div>
             </div>
           )
         })()}
@@ -2481,7 +2535,9 @@ export default function AdminWorkers() {
                 <span className="text-stone-600">
                   {modal.calc.model === 'plata'
                     ? `plata ${formatMoney(modal.calc.salary, false)} ÷ 2`
-                    : modal.calc.reduced > 0
+                    : modal.calc.model === 'procenat'
+                      ? 'bez dnevnice'
+                      : modal.calc.reduced > 0
                       ? `${countLabel(modal.calc.days, 'dan')} · ${modal.calc.reduced} umanjeno`
                       : `${countLabel(modal.calc.days, 'dan')} × ${formatMoney(modal.calc.wage, false)}`}
                 </span>

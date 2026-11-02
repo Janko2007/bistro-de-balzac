@@ -114,6 +114,7 @@ export default function ScheduleAdmin({ weekStart }) {
   const [signupsOpenList, setSignupsOpenList] = usePersistentState('schedule.signupsOpen', false)
   // radnici čije su prijave otvorene (sve zatvoreno dok se ne klikne)
   const [openPeople, setOpenPeople] = useState(() => new Set())
+  const [unsignedOpen, setUnsignedOpen] = useState(false) // spisak onih koji se nisu prijavili
   const togglePerson = (id) =>
     setOpenPeople((prev) => {
       const next = new Set(prev)
@@ -311,6 +312,9 @@ export default function ScheduleAdmin({ weekStart }) {
   const midPlaced = slots.some((s) => s.shift === 'medjusmena')
   const isOpen = signupsOpen(week)
   const signedPeople = new Set(signups.map((s) => s.profile_id))
+  const unsignedPeople = people
+    .filter((p) => p.role !== 'admin' && p.is_active !== false && !signedPeople.has(p.id))
+    .sort((a, b) => a.full_name.localeCompare(b.full_name, 'sr'))
 
   const signupsAt = (day, shift) => signups.filter((s) => s.day === day && s.shift === shift)
   const slotAt = (day, shift, slot) => slots.find((s) => s.day === day && s.shift === shift && s.slot === slot)
@@ -750,7 +754,13 @@ export default function ScheduleAdmin({ weekStart }) {
         {signupsOpenList && (
           <ul className="divide-y divide-stone-100 border-t border-stone-100">
             {people
-              .filter((p) => p.role !== 'admin' || signedPeople.has(p.id))
+              .filter((p) => signedPeople.has(p.id))
+              // Ko je prijavio više smena ide gore; isti broj — po abecedi.
+              .sort((a, b) => {
+                const na = signups.filter((s) => s.profile_id === a.id).length
+                const nb = signups.filter((s) => s.profile_id === b.id).length
+                return nb - na || a.full_name.localeCompare(b.full_name, 'sr')
+              })
               .map((p) => {
                 const mine = signups
                   .filter((s) => s.profile_id === p.id)
@@ -819,6 +829,47 @@ export default function ScheduleAdmin({ weekStart }) {
                 )
               })}
           </ul>
+        )}
+
+        {/* Ko se nije prijavio — zatvoreno ispod poslednjeg prijavljenog, otvara se klikom. */}
+        {signupsOpenList && unsignedPeople.length > 0 && (
+          <div className="border-t border-stone-200">
+            <button
+              type="button"
+              onClick={() => setUnsignedOpen((v) => !v)}
+              aria-expanded={unsignedOpen}
+              className={cx(
+                'flex w-full items-center gap-2.5 px-4 py-3 text-left transition',
+                unsignedOpen ? 'bg-stone-50' : 'hover:bg-stone-50',
+              )}
+            >
+              <svg
+                className={cx('h-4 w-4 shrink-0 text-stone-400 transition-transform', unsignedOpen && 'rotate-90')}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+              <span className="min-w-0 flex-1 text-sm font-semibold text-stone-600">Nisu se prijavili</span>
+              <span className="shrink-0 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-bold tabular-nums text-rose-700">
+                {unsignedPeople.length}
+              </span>
+            </button>
+            {unsignedOpen && (
+              <ul className="divide-y divide-stone-100 border-t border-stone-100 bg-stone-50">
+                {unsignedPeople.map((p) => (
+                  <li key={p.id} className="px-4 py-2.5 pl-11 text-sm font-medium text-stone-700">
+                    {p.full_name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </Card>
       {/* ---------- Smene u nedelji (padajući meni) ---------- */}

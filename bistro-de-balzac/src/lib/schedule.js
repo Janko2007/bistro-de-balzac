@@ -108,17 +108,28 @@ export const SHIFT_INFO = {
 /*  jedan dan. Čuva se u polju `note` nedelje kao {"hours": {...}}, pa  */
 /*  ne treba nova skripta za bazu.                                      */
 /* ------------------------------------------------------------------ */
-export function hoursMap(week) {
+/** Sve što admin dopisuje uz nedelju: radno vreme po danu i ručno upisana imena. */
+function parseNote(week) {
   try {
     const parsed = JSON.parse(week?.note ?? '')
-    return parsed && typeof parsed === 'object' && parsed.hours && typeof parsed.hours === 'object'
-      ? parsed.hours
-      : {}
+    if (!parsed || typeof parsed !== 'object') return { hours: {}, texts: {} }
+    return {
+      hours: parsed.hours && typeof parsed.hours === 'object' ? parsed.hours : {},
+      texts: parsed.texts && typeof parsed.texts === 'object' ? parsed.texts : {},
+    }
   } catch {
-    return {}
+    return { hours: {}, texts: {} }
   }
 }
 
+function packNote(hours, texts) {
+  const out = {}
+  if (Object.keys(hours).length > 0) out.hours = hours
+  if (Object.keys(texts).length > 0) out.texts = texts
+  return Object.keys(out).length > 0 ? JSON.stringify(out) : null
+}
+
+export const hoursMap = (week) => parseNote(week).hours
 /** Vreme smene za dati dan: izabrano, a ako ga nema — uobičajeno. */
 export const timeOf = (week, shift, day) => hoursMap(week)[`${day}|${shift}`] || SHIFT_INFO[shift].time(day)
 
@@ -127,11 +138,11 @@ export const hasCustomTime = (week, shift, day) => Boolean(hoursMap(week)[`${day
 
 /** Novi tekst polja `note` sa upisanim (ili vraćenim na uobičajeno, kad je value prazno) vremenom. */
 export function withHours(week, shift, day, value) {
-  const hours = { ...hoursMap(week) }
+  const { hours, texts } = parseNote(week)
   const key = `${day}|${shift}`
   if (value) hours[key] = value
   else delete hours[key]
-  return Object.keys(hours).length > 0 ? JSON.stringify({ hours }) : null
+  return packNote(hours, texts)
 }
 
 /**

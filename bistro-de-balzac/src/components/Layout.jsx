@@ -1,12 +1,14 @@
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { APP_NAME } from '../lib/supabaseClient'
 import { cx } from '../lib/utils'
 import { clearPersistedState } from '../lib/persist'
+import { getPayPeriod, loadPayPeriod } from '../lib/payperiod'
 import { deriveTheme, useThemeColor } from '../lib/theme'
 import Avatar from './Avatar'
 import InstallPrompt from './InstallPrompt'
+import { FullPageLoader } from './ui'
 import AnnouncementGate from './AnnouncementGate'
 
 /* Vreme pravljenja verzije — upisuje ga Vite pri objavi (vidi vite.config.js).
@@ -99,6 +101,20 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false)
 
   useScrollMemory()
+
+  // Obračunski period podešava admin — učitava se pri prijavi, pa se ekran osveži.
+  const [periodVersion, setPeriodVersion] = useState(0)
+  useEffect(() => {
+    if (!profile?.id) return undefined
+    let active = true
+    const before = JSON.stringify(getPayPeriod())
+    loadPayPeriod().then((cfg) => {
+      if (active && JSON.stringify(cfg) !== before) setPeriodVersion((v) => v + 1)
+    })
+    return () => {
+      active = false
+    }
+  }, [profile?.id])
 
   // Boju gornje i donje trake bira svako za sebe: radnik u Profilu, admin u Radnici (dno).
   const themeColor = useThemeColor(profile?.id)
@@ -221,7 +237,9 @@ export default function Layout() {
 
       {/* ---------- Sadržaj ---------- */}
       <main className="mx-auto w-full max-w-6xl px-4 py-5">
-        <Outlet />
+        <Suspense fallback={<FullPageLoader />}>
+          <Outlet key={periodVersion} />
+        </Suspense>
       </main>
 
       <InstallPrompt />
@@ -259,19 +277,16 @@ export default function Layout() {
                   <span
                     className={cx(
                       'flex items-center justify-center rounded-2xl transition-all duration-200',
-                      isAdmin ? 'h-7 w-14' : 'h-11 w-[72px]',
+                      'h-11 w-[72px]',
                       isActive ? 'bg-brand-100/80 shadow-sm' : 'group-active:bg-stone-100',
                     )}
                     style={isActive && theme ? { backgroundColor: `${theme.navActive}24` } : undefined}
                   >
                     <Icon
                       path={item.icon}
-                      className={cx(isAdmin ? 'h-5 w-5' : 'h-[26px] w-[26px]', isActive && 'scale-105')}
+                      className={cx('h-[26px] w-[26px]', isActive && 'scale-105')}
                     />
                   </span>
-                  {isAdmin && (
-                    <span className="w-full truncate px-1 text-center leading-none">{item.label}</span>
-                  )}
                 </>
               )}
             </NavLink>

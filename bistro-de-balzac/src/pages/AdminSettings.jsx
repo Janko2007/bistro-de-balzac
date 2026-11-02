@@ -2,6 +2,7 @@ import { useAuth } from '../context/AuthContext'
 import { AvatarEditor } from '../components/Avatar'
 import AboutApp from '../components/AboutApp'
 import MyDetails from '../components/MyDetails'
+import PayPeriodEditor from '../components/PayPeriodEditor'
 import ShiftFormEditor from '../components/ShiftFormEditor'
 import ThemePicker from '../components/ThemePicker'
 import { Card } from '../components/ui'
@@ -49,6 +50,7 @@ export default function AdminSettings() {
       <Group title="Aplikacija">
         <ThemePicker />
         <ShiftFormEditor />
+        <PayPeriodEditor />
       </Group>
 
       <Group title="Artikli">

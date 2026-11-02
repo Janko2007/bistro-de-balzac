@@ -134,10 +134,11 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
 /** Spaja profil i statistiku u red obračuna. */
 export function settle(profile, stats = EMPTY_STATS) {
-  const model = profile?.pay_model === 'plata' ? 'plata' : 'dnevnica'
   const wage = Number(profile?.daily_wage ?? 0)
   const salary = Number(profile?.monthly_salary ?? 0)
   const percent = Number(profile?.percent ?? 0)
+  // Procenat od pazara nema posebnu vrednost u bazi: to je dnevnica 0 uz procenat.
+  const model = profile?.pay_model === 'plata' ? 'plata' : wage === 0 && percent > 0 ? 'procenat' : 'dnevnica'
 
   // Dnevnica ide po danu: međusmena u dve smene istog dana = jedna dnevnica.
   const days = stats.days ?? stats.shifts

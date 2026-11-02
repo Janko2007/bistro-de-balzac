@@ -83,6 +83,18 @@ export default defineConfig({
       }).format(new Date()),
     ),
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Biblioteke se menjaju retko, pa ostaju u svom fajlu koji pregledač
+        // zadrži u kešu čak i kad izađe nova verzija aplikacije.
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          supabase: ['@supabase/supabase-js'],
+        },
+      },
+    },
+  },
   server: {
     host: true,
     port: 5173,

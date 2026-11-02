@@ -335,7 +335,9 @@ export default function NewReport() {
       .from('shift_reports')
       .select('id, report_date, shift, shift_report_staff!inner(profile_id)')
       .eq('shift_report_staff.profile_id', profile.id)
-      .in('status', ['otvoren', 'vracen'])
+      // Vraćen popis se ne otvara sam — radnik ga otvara iz Mojih izveštaja
+      // („Ispravi popis“), pa se ovde računaju samo smene koje traju.
+      .eq('status', 'otvoren')
       .order('report_date', { ascending: false })
       .limit(10)
 
@@ -1400,7 +1402,7 @@ export default function NewReport() {
 
             {/* Međusmena: radiš i prvu i drugu, a dnevnica je jedna. Uključuje se
                 odavde, iz bilo koje od te dve smene. Radi je samo jedan radnik. */}
-            {editable && !adminEdit && (
+            {editable && !adminEdit && status !== 'vracen' && (
               <div className="mt-3">
                 <button
                   type="button"

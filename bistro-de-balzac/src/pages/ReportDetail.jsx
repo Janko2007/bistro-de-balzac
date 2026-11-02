@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabaseClient'
 import { categoryComparator, loadCategories } from '../lib/categories'
 import { heading, printDocument, statGrid, table, textBlock } from '../lib/print'
 import CompareShifts from '../components/CompareShifts'
+import MidMark from '../components/MidMark'
 import ReportPicker from '../components/ReportPicker'
 import {
   Badge,
@@ -62,6 +63,8 @@ export default function ReportDetail() {
   const [moreOpen, setMoreOpen] = useState(false)
   const [staffToRemove, setStaffToRemove] = useState(null) // radnik kome se traži potvrda uklanjanja
   const [allWorkers, setAllWorkers] = useState([])
+  // Ko je tog dana radio međusmenu — pored imena stoji ikonica.
+  const [midIds, setMidIds] = useState(() => new Set())
   const [staffDraft, setStaffDraft] = useState([])
   const [categories, setCategories] = useState([])
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -135,6 +138,30 @@ export default function ReportDetail() {
 
     setLoading(false)
   }, [id, toast])
+
+  useEffect(() => {
+    if (!report?.report_date) return
+    if (report.shift === 'medjusmena') {
+      setMidIds(new Set((report.staff ?? []).map((s) => s.profile?.id).filter(Boolean)))
+      return
+    }
+    let active = true
+    supabase
+      .from('shift_reports')
+      .select('staff:shift_report_staff ( profile_id )')
+      .eq('report_date', report.report_date)
+      .eq('shift', 'medjusmena')
+      .is('deleted_at', null)
+      .then(({ data, error }) => {
+        if (!active || error) return
+        const ids = new Set()
+        for (const row of data ?? []) for (const s of row.staff ?? []) ids.add(s.profile_id)
+        setMidIds(ids)
+      })
+    return () => {
+      active = false
+    }
+  }, [report?.id, report?.report_date, report?.shift, report?.staff?.length])
 
   /* Ceo spisak artikala — da se vidi i ono što radnik nije popisao. */
   const [catalog, setCatalog] = useState([])
@@ -569,10 +596,14 @@ export default function ReportDetail() {
   }
 
   const isOwner = report.created_by === profile?.id
+  // Prvo oni koji su radili smenu, pa na kraju oni sa međusmenom.
   const staffList = (report.staff ?? [])
     .filter((s) => s.profile?.id)
-    .sort((a, b) => String(a.profile.full_name).localeCompare(String(b.profile.full_name)))
-  const staffNames = staffList.map((s) => s.profile.full_name)
+    .sort(
+      (a, b) =>
+        Number(midIds.has(a.profile.id)) - Number(midIds.has(b.profile.id)) ||
+        String(a.profile.full_name).localeCompare(String(b.profile.full_name)),
+    )
 
   return (
     <div className="space-y-4 pb-28">
@@ -666,8 +697,9 @@ export default function ReportDetail() {
                   return (
                     <li key={entry.profile.id} className="py-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-800">
-                        {entry.profile.full_name}
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-semibold text-stone-800">
+                        <span className="truncate">{entry.profile.full_name}</span>
+                        {midIds.has(entry.profile.id) && <MidMark />}
                       </span>
                       {!plata && (
                         <span className="shrink-0 text-[13px] tabular-nums">
@@ -747,10 +779,11 @@ export default function ReportDetail() {
             )
           ) : (
             <div className="mt-1.5 flex flex-wrap gap-2">
-              {staffNames.length > 0 ? (
-                staffNames.map((name) => (
-                  <Badge key={name} className="bg-stone-100 text-stone-700 ring-stone-300">
-                    {name}
+              {staffList.length > 0 ? (
+                staffList.map((s) => (
+                  <Badge key={s.profile.id} className="bg-stone-100 text-stone-700 ring-stone-300">
+                    {s.profile.full_name}
+                    {midIds.has(s.profile.id) && <MidMark className="ml-1.5" />}
                   </Badge>
                 ))
               ) : (

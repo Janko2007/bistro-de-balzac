@@ -1,18 +1,54 @@
+import { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import Layout from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { useAuth } from './context/AuthContext'
+import { FullPageLoader } from './components/ui'
 import { isSupabaseConfigured } from './lib/supabaseClient'
 
-import Login from './pages/Login'
-import NewReport from './pages/NewReport'
-import Profile from './pages/Profile'
-import ReportDetail from './pages/ReportDetail'
-import AdminDashboard from './pages/AdminDashboard'
-import AdminSettings from './pages/AdminSettings'
-import AdminWorkers from './pages/AdminWorkers'
-import Schedule from './pages/Schedule'
+/**
+ * Ekrani se učitavaju tek kad zatrebaju, pa se pri otvaranju aplikacije
+ * skida samo ono što je potrebno (radnik ne skida admin ekrane i obrnuto).
+ *
+ * Ako posle nove verzije pregledač traži stari fajl koji više ne postoji,
+ * stranica se jednom sama osveži umesto da ostane prazna.
+ */
+const RELOAD_FLAG = 'bdb.chunk-reload'
+function lazyPage(load) {
+  return lazy(() =>
+    load()
+      .then((mod) => {
+        try {
+          window.sessionStorage.removeItem(RELOAD_FLAG)
+        } catch {
+          /* bez skladišta */
+        }
+        return mod
+      })
+      .catch((err) => {
+        try {
+          if (!window.sessionStorage.getItem(RELOAD_FLAG)) {
+            window.sessionStorage.setItem(RELOAD_FLAG, '1')
+            window.location.reload()
+            return new Promise(() => {})
+          }
+        } catch {
+          /* bez skladišta */
+        }
+        throw err
+      }),
+  )
+}
+
+const Login = lazyPage(() => import('./pages/Login'))
+const NewReport = lazyPage(() => import('./pages/NewReport'))
+const Profile = lazyPage(() => import('./pages/Profile'))
+const ReportDetail = lazyPage(() => import('./pages/ReportDetail'))
+const AdminDashboard = lazyPage(() => import('./pages/AdminDashboard'))
+const AdminSettings = lazyPage(() => import('./pages/AdminSettings'))
+const AdminWorkers = lazyPage(() => import('./pages/AdminWorkers'))
+const Schedule = lazyPage(() => import('./pages/Schedule'))
 
 /** Početna strana zavisi od uloge: admin -> dashboard, radnik -> novi popis. */
 function HomeRoute() {
@@ -47,7 +83,14 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/prijava" element={<Login />} />
+      <Route
+        path="/prijava"
+        element={
+          <Suspense fallback={<FullPageLoader />}>
+            <Login />
+          </Suspense>
+        }
+      />
 
       <Route
         element={

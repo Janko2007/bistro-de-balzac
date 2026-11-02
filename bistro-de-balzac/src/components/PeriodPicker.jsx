@@ -3,6 +3,9 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   currentPeriod,
   isFuturePeriod,
+  getPayPeriod,
+  isByDays,
+  isMonthly,
   isOpenPeriod,
   periodFromKey,
   periodLabel,
@@ -12,8 +15,6 @@ import { LOCALE, cx } from '../lib/utils'
 
 /** Koliko meseci unazad nudi meni — 12 meseci = 24 perioda (godinu dana). */
 const MONTHS = 12
-
-const lastDayOf = (year, month) => new Date(year, month, 0).getDate()
 
 function monthTitle(period) {
   const name = new Intl.DateTimeFormat(LOCALE, { month: 'long' }).format(
@@ -37,6 +38,17 @@ export default function PeriodPicker({ period, onChange, className, since = '' }
   // `since` (YYYY-MM-DD): od kad je radnik u kolektivu — ranijih perioda nema.
   const months = useMemo(() => {
     const list = []
+    // Periodi po zadatom broju dana: običan spisak, najnoviji prvi.
+    if (isByDays()) {
+      let p = currentPeriod()
+      for (let i = 0; i < 40; i += 1) {
+        if (since && p.to < since) break
+        list.push({ a: p, b: null, flat: true })
+        p = shiftPeriod(p, -1)
+      }
+      return list
+    }
+    const monthly = isMonthly()
     let first = periodFromKey(`${currentPeriod().key.slice(0, 7)}-A`)
     const count = since
       ? Math.min(
@@ -45,11 +57,16 @@ export default function PeriodPicker({ period, onChange, className, since = '' }
         )
       : MONTHS
     for (let i = 0; i < Math.max(count, 1); i += 1) {
-      list.push({ a: first, b: shiftPeriod(first, 1) })
-      first = shiftPeriod(first, -2) // prvi period prethodnog meseca
+      if (monthly) {
+        list.push({ a: first, b: null })
+        first = shiftPeriod(first, -1)
+      } else {
+        list.push({ a: first, b: shiftPeriod(first, 1) })
+        first = shiftPeriod(first, -2) // prvi period prethodnog meseca
+      }
     }
     return list
-  }, [since])
+  }, [since, getPayPeriod()])
 
   const beforeStart = (p) => Boolean(since) && p.to < since
 
@@ -87,7 +104,7 @@ export default function PeriodPicker({ period, onChange, className, since = '' }
         aria-pressed={selected}
         aria-label={`${periodLabel(p)}${now ? ' (u toku)' : ''}`}
         className={cx(
-          'rounded-lg py-1.5 text-[13px] tabular-nums transition',
+          'rounded-lg px-2 py-1.5 text-[13px] tabular-nums transition',
           'disabled:cursor-default disabled:opacity-30',
           selected
             ? 'bg-brand-600 font-semibold text-white'
@@ -139,7 +156,12 @@ export default function PeriodPicker({ period, onChange, className, since = '' }
           aria-label="Izaberi obračunski period"
           className="absolute inset-x-0 top-full z-20 mt-1.5 max-h-[244px] overflow-y-auto overscroll-contain rounded-xl bg-white px-1.5 pb-1.5 pt-1 shadow-lg shadow-stone-900/10 ring-1 ring-stone-100"
         >
-          {months.map(({ a, b }, i) => (
+          {months.map(({ a, b, flat }, i) =>
+            flat ? (
+              <div key={a.key} className="py-px">
+                {option(a, periodLabel(a))}
+              </div>
+            ) : (
             // Bez omotača — naslov godine mora biti direktno u listi da bi
             // ostao gore dok se meseci te godine pomeraju.
             <Fragment key={a.key}>
@@ -152,11 +174,12 @@ export default function PeriodPicker({ period, onChange, className, since = '' }
                 <span className="whitespace-nowrap text-[13.5px] font-medium text-stone-900">
                   {monthTitle(a)}
                 </span>
-                {option(a, '1–15.')}
-                {option(b, `16–${lastDayOf(b.year, b.month)}.`)}
+                {option(a, `${Number(a.from.slice(8, 10))}–${Number(a.to.slice(8, 10))}.`)}
+                {b ? option(b, `${Number(b.from.slice(8, 10))}–${Number(b.to.slice(8, 10))}.`) : <span aria-hidden="true" />}
               </div>
             </Fragment>
-          ))}
+            ),
+          )}
         </div>
       )}
     </div>

@@ -71,6 +71,27 @@ export default function AdminDeposits({ embedded = false }) {
     })
   const [dayToDelete, setDayToDelete] = useState(null) // dan čiji se popisi brišu
 
+  /* Utišano: sve se i dalje beleži i računa, samo ne upozorava i ne ističe iznos.
+     Pamti se na ovom uređaju, pa ostaje i posle zatvaranja aplikacije. */
+  const [muted, setMuted] = useState(() => {
+    try {
+      return window.localStorage.getItem('bdb.deposits.muted') === '1'
+    } catch {
+      return false
+    }
+  })
+  function toggleMuted() {
+    setMuted((v) => {
+      const next = !v
+      try {
+        window.localStorage.setItem('bdb.deposits.muted', next ? '1' : '0')
+      } catch {
+        /* bez trajnog skladišta — važi dok je aplikacija otvorena */
+      }
+      return next
+    })
+  }
+
   /* ---------------------------------------------------------------- */
   /*  Učitavanje                                                       */
   /* ---------------------------------------------------------------- */
@@ -546,12 +567,13 @@ export default function AdminDeposits({ embedded = false }) {
     <div className="space-y-4">
       {/* ---------- Uplate kao padajući meni (u Pregledu) ---------- */}
       {embedded && (
-        <Card>
+        <Card className={muted ? 'opacity-90' : undefined}>
+          <div className="flex items-center">
           <button
             type="button"
             onClick={() => setSectionOpen((v) => !v)}
             aria-expanded={sectionOpen}
-            className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+            className="flex min-w-0 flex-1 items-center gap-3 py-3.5 pl-4 pr-2 text-left"
           >
             <svg
               className={cx('h-4 w-4 shrink-0 text-stone-400 transition-transform', sectionOpen && 'rotate-90')}
@@ -568,11 +590,34 @@ export default function AdminDeposits({ embedded = false }) {
             <span className="min-w-0 flex-1">
               <span className="block text-[15px] font-semibold tracking-tight text-stone-900">Uplate</span>
               <span className="mt-0.5 block text-[13px] text-stone-500">
-                {totals.owed > 0 ? `Za uplatu ${formatMoney(totals.owed, false)}` : 'Sve je uplaćeno'}
+                {muted
+                  ? 'Utišano · sve se i dalje beleži'
+                  : totals.owed > 0
+                    ? `Za uplatu ${formatMoney(totals.owed, false)}`
+                    : 'Sve je uplaćeno'}
               </span>
             </span>
-            {totals.due > 0 && <Badge className="bg-rose-100 text-rose-700 ring-rose-600/20">rok stigao</Badge>}
+            {!muted && totals.due > 0 && (
+              <Badge className="bg-rose-100 text-rose-700 ring-rose-600/20">rok stigao</Badge>
+            )}
           </button>
+          <button
+            type="button"
+            onClick={toggleMuted}
+            aria-pressed={muted}
+            title={muted ? 'Uključi upozorenja za uplate' : 'Privremeno utišaj upozorenja za uplate'}
+            className={cx(
+              'mr-3 flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition',
+              muted ? 'bg-ink text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200',
+            )}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 8a6 6 0 00-9.3-5M6 8c0 7-3 9-3 9h14M10.3 21a1.94 1.94 0 003.4 0" />
+              {muted && <path d="M2 2l20 20" />}
+            </svg>
+            {muted ? 'Uključi' : 'Utišaj'}
+          </button>
+          </div>
         </Card>
       )}
 

@@ -38,6 +38,26 @@ export async function addPosition(name, count = 0) {
   return value
 }
 
+/** Radno mesto sklonjeno sa spiska (ostaje upisano kod radnika koji ga već imaju). */
+export async function removePosition(id) {
+  const { error } = await supabase.from('positions').update({ is_active: false }).eq('id', id)
+  if (error) throw error
+}
+
+/** Predlozi koji se nude dok spisak ne sadrži ta radna mesta. */
+export const POSITION_SUGGESTIONS = [
+  'Konobar',
+  'Šanker',
+  'Barista',
+  'Kuvar',
+  'Pomoćni kuvar',
+  'Menadžer',
+  'Pomoćni radnik',
+  'Čistačica',
+  'Dostavljač',
+  'Obuka',
+]
+
 /** „Konobar, Šanker“ → ['Konobar', 'Šanker'] */
 export function parsePositions(text) {
   return String(text ?? '')
