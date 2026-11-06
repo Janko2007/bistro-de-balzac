@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import DownloadIcon from '../components/DownloadIcon'
 import { usePersistentState } from '../lib/persist'
 
 import { useToast } from '../context/ToastContext'
@@ -373,8 +374,14 @@ export default function AdminItems({ embedded = false }) {
           <Button variant="secondary" size="sm" onClick={() => setInventoryOpen(true)}>
             Popisi
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
-            Preuzmi popis
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-label="Preuzmi popis"
+            title="Preuzmi popis"
+            onClick={() => setPickerOpen(true)}
+          >
+            <DownloadIcon />
           </Button>
           <Button size="sm" className="ml-auto" onClick={openNew}>
             + Novi

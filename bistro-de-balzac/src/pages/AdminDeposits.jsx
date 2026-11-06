@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import DownloadIcon from '../components/DownloadIcon'
 import { usePersistentState } from '../lib/persist'
 
 import { useAuth } from '../context/AuthContext'
@@ -660,8 +661,14 @@ export default function AdminDeposits({ embedded = false }) {
           }
           action={
             <div className="flex shrink-0 items-center gap-1">
-              <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
-                Preuzmi
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="Preuzmi izveštaj o uplatama"
+                title="Preuzmi"
+                onClick={() => setPickerOpen(true)}
+              >
+                <DownloadIcon />
               </Button>
               <Button variant="ghost" size="sm" onClick={load}>
                 Osveži

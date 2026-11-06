@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import DownloadIcon from './DownloadIcon'
 import { usePersistentState } from '../lib/persist'
 
 import { useToast } from '../context/ToastContext'
@@ -277,8 +278,14 @@ export default function ItemSalesReport({ items, categories }) {
         <div className="flex flex-wrap items-center gap-1.5">
           {rows.length > 0 && (
             <span className="order-last ml-auto flex items-center gap-1.5">
-              <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
-                Preuzmi
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="Preuzmi prodaju"
+                title="Preuzmi"
+                onClick={() => setPickerOpen(true)}
+              >
+                <DownloadIcon />
               </Button>
               <Button variant="secondary" size="sm" onClick={exportCsv}>
                 CSV

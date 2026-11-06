@@ -175,6 +175,7 @@ const isDone = (row) =>
  */
 
 export default function NewReport() {
+
   const { profile, isAdmin } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
@@ -1291,25 +1292,15 @@ export default function NewReport() {
   /* ============================================================== */
   const shiftCard = (
     <Card>
-      <CardHeader
-        title="Smena"
-        subtitle={joinsExisting && !reportId ? 'U toku' : undefined}
-        action={
-          reportId && editable ? (
-            <span
-              className={cx(
-                'shrink-0 text-[11px] font-semibold',
-                saveState === 'error' ? 'text-rose-600' : 'text-stone-400',
-              )}
-            >
-              {saveState === 'saving' && 'Čuva se…'}
-              {saveState === 'saved' && 'Sačuvano'}
-              {saveState === 'error' && 'Nije sačuvano'}
-            </span>
-          ) : null
-        }
-      />
-      <div className="space-y-4 p-4">
+      {/* Čuvanje ide samo od sebe i tiho; javlja se samo ako nije uspelo. */}
+      {reportId && editable && saveState === 'error' && (
+        <div className="flex justify-end px-4 pt-2.5">
+          <span className="shrink-0 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-200">
+            Nije sačuvano
+          </span>
+        </div>
+      )}
+      <div className={cx('space-y-4 p-4', reportId && editable && saveState === 'error' && '!pt-2')}>
         <Field label="Datum">
           <Input
             type="date"
@@ -1439,9 +1430,21 @@ export default function NewReport() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="mt-1 px-0 text-rose-600"
+                  className="mt-2 w-full justify-center gap-2 rounded-2xl border border-rose-300 bg-white text-rose-600 hover:bg-rose-50"
                   onClick={() => setLeaveOpen(true)}
                 >
+                  <svg
+                    className="h-4 w-4 shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.25"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+                  </svg>
                   Izađi iz smene
                 </Button>
               </div>
@@ -1595,15 +1598,22 @@ export default function NewReport() {
               )}
               {returnInfo.mismatches.length > 0 && (
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-rose-700">Stanje se ne poklapa</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-rose-700">Manjak</p>
                   <ul className="mt-1.5 space-y-0.5 text-sm text-rose-900">
-                    {returnInfo.mismatches.map((m) => (
-                      <li key={m.item_name}>
-                        <b>{m.item_name}</b> · upisano {formatQty(m.qty_end)}
-                        {m.check_qty !== null && m.check_qty !== undefined
-                          ? `, tačno ${formatQty(m.check_qty)}`
-                          : ''}
-                      </li>
+                    {returnInfo.mismatches.map((m) => {
+                      const hasExact = m.check_qty !== null && m.check_qty !== undefined
+                      const diff = hasExact
+                        ? Math.round((Number(m.qty_end) - Number(m.check_qty)) * 100) / 100
+                        : 0
+                      return (
+                        <li key={m.item_name}>
+                          <b>{m.item_name}</b> · upisano {formatQty(m.qty_end)}
+                          {hasExact ? `, tačno ${formatQty(m.check_qty)}` : ''}
+                          {diff > 0 && <b className="text-rose-700"> · manjak {formatQty(diff)}</b>}
+                          {diff < 0 && <b className="text-rose-700"> · višak {formatQty(-diff)}</b>}
+                        </li>
+                      )
+                    })}
                     ))}
                   </ul>
                 </div>

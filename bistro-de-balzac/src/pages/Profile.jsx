@@ -4,6 +4,7 @@ import AboutApp from '../components/AboutApp'
 import ThemePicker from '../components/ThemePicker'
 import AnnouncementList from '../components/AnnouncementList'
 import BadgeInfo from '../components/BadgeInfo'
+import MenuLink from '../components/MenuLink'
 import MyDetails from '../components/MyDetails'
 import RuleDocs from '../components/RuleDocs'
 import { Card } from '../components/ui'
@@ -43,6 +44,9 @@ export default function Profile() {
 
       {/* ---------- Dnevnice ---------- */}
       <MyEarnings />
+
+      {/* ---------- Karta pića — posebna sekcija, otvara sajt sa menijem ---------- */}
+      <MenuLink />
 
       {/* ---------- Tim, Bedževi i Radnici meseca — jedna kartica ---------- */}
       <Card className="divide-y divide-stone-100">

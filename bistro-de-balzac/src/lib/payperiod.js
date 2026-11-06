@@ -198,19 +198,22 @@ export function periodFromKey(key) {
   return makePeriod(+match[1], +match[2], match[3] === 'A' ? 1 : 2)
 }
 
-/** "1–15. septembar 2026." ili, preko granice meseca, "28. okt – 10. nov 2026." */
-export function periodLabel(period) {
+/**
+ * "1–15. septembar 2026." ili, preko granice meseca, "28. okt – 10. nov 2026."
+ * `withYear = false` izostavlja godinu — za mala polja gde ne bi stala.
+ */
+export function periodLabel(period, withYear = true) {
   const fmt = (opts) => new Intl.DateTimeFormat(LOCALE, opts)
   const [fy, fm, fd] = period.from.split('-').map(Number)
   const [ty, tm, td] = period.to.split('-').map(Number)
 
   if (fy === ty && fm === tm) {
     const monthName = fmt({ month: 'long' }).format(new Date(fy, fm - 1, 1))
-    return `${fd}–${td}. ${monthName} ${fy}.`
+    return `${fd}–${td}. ${monthName}${withYear ? ` ${fy}.` : ''}`
   }
   const short = (y, m) => fmt({ month: 'short' }).format(new Date(y, m - 1, 1)).replace('.', '')
-  const left = `${fd}. ${short(fy, fm)}${fy !== ty ? ` ${fy}.` : ''}`
-  return `${left} – ${td}. ${short(ty, tm)} ${ty}.`
+  const left = `${fd}. ${short(fy, fm)}${withYear && fy !== ty ? ` ${fy}.` : ''}`
+  return `${left} – ${td}. ${short(ty, tm)}${withYear ? ` ${ty}.` : ''}`
 }
 
 /** Da li je period još uvek u toku? */

@@ -69,12 +69,12 @@ export function fromLocalInput(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
-/** Dan u nedelji i sat, npr. "četvrtak u 20:00" — datum se ne piše. */
+/** Dan u nedelji i sat, npr. "četvrtak do 20:00" — datum se ne piše. */
 export function deadlineLabel(iso) {
   if (!iso) return 'bez roka'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return 'bez roka'
-  return `${DAY_NAMES[(d.getDay() + 6) % 7]} u ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return `${DAY_NAMES[(d.getDay() + 6) % 7]} do ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /** Da li su prijave još otvorene. */

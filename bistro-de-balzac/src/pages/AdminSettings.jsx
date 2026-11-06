@@ -1,6 +1,7 @@
 import { useAuth } from '../context/AuthContext'
 import { AvatarEditor } from '../components/Avatar'
 import AboutApp from '../components/AboutApp'
+import MenuLink from '../components/MenuLink'
 import MyDetails from '../components/MyDetails'
 import PayPeriodEditor from '../components/PayPeriodEditor'
 import ShiftFormEditor from '../components/ShiftFormEditor'
@@ -55,6 +56,7 @@ export default function AdminSettings() {
 
       <Group title="Artikli">
         <AdminItems embedded />
+        <MenuLink />
       </Group>
 
       <AboutApp />

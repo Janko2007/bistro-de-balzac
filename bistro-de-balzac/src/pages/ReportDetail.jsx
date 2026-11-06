@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabaseClient'
 import { categoryComparator, loadCategories } from '../lib/categories'
 import { heading, printDocument, statGrid, table, textBlock } from '../lib/print'
 import CompareShifts from '../components/CompareShifts'
+import DownloadIcon from '../components/DownloadIcon'
 import MidMark from '../components/MidMark'
 import ReportPicker from '../components/ReportPicker'
 import {
@@ -26,6 +27,7 @@ import {
 } from '../components/ui'
 import {
   SHIFT_LABELS,
+  SHIFT_SHORT,
   SHIFT_STYLES,
   STATUS_LABELS,
   STATUS_STYLES,
@@ -38,6 +40,54 @@ import {
   formatQty,
   parseNumber,
 } from '../lib/utils'
+
+/**
+ * Koliko fali (ili viška ima): upisano krajnje stanje naspram tačnog, koje je
+ * admin izbrojao. Bez tačnog broja nema iznosa.
+ */
+function shortageOf(item) {
+  if (item.check_qty === null || item.check_qty === undefined) return null
+  const diff = Math.round((Number(item.qty_end) - Number(item.check_qty)) * 100) / 100
+  if (diff > 0) return { label: 'manjak', amount: diff }
+  if (diff < 0) return { label: 'višak', amount: -diff }
+  return { label: 'tačno', amount: 0 }
+}
+
+/** Spisak radnika iz smene sa kvačicama — bira se kome se šalje. */
+function StaffPick({ list, picked, onToggle, midIds }) {
+  return (
+    <ul className="divide-y divide-stone-100 rounded-2xl ring-1 ring-inset ring-stone-200">
+      {list.map((entry) => {
+        const pid = entry.profile.id
+        const on = picked.has(pid)
+        return (
+          <li key={pid}>
+            <button
+              type="button"
+              onClick={() => onToggle(pid)}
+              aria-pressed={on}
+              className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition hover:bg-stone-50"
+            >
+              <span
+                className={cx(
+                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold transition',
+                  on ? 'bg-brand-600 text-white' : 'bg-white text-transparent ring-1 ring-inset ring-stone-300',
+                )}
+                aria-hidden="true"
+              >
+                ✓
+              </span>
+              <span className="min-w-0 flex-1 text-sm font-semibold text-stone-900">
+                {entry.profile.full_name}
+                {midIds.has(pid) && <MidMark className="ml-2 align-middle" />}
+              </span>
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
 
 export default function ReportDetail() {
   const { id } = useParams()
@@ -55,6 +105,11 @@ export default function ReportDetail() {
   const [working, setWorking] = useState(false)
   const [openCats, setOpenCats] = usePersistentState(`reportdetail.openCats.${id}`, () => new Set())
   const [returnOpen, setReturnOpen] = useState(false)
+  const [manjakOpen, setManjakOpen] = useState(false)
+  // Kome se šalje ispravka / manjak (id-jevi radnika iz smene).
+  const [sendPicked, setSendPicked] = useState(() => new Set())
+  // Šta je već poslato kome: Map(id radnika → { fix, manjak }). null = baza još nema te oznake.
+  const [flags, setFlags] = useState(null)
   const [noteOpen, setNoteOpen] = useState(false)
   const [adminNote, setAdminNote] = useState('')
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -112,6 +167,22 @@ export default function ReportDetail() {
 
     setReport(data)
     setAdminNote(data.admin_note ?? '')
+    supabase
+      .from('shift_report_staff')
+      .select('profile_id, fix_requested, manjak_sent')
+      .eq('report_id', data.id)
+      .then(({ data: rows, error: flagError }) => {
+        setFlags(
+          flagError
+            ? null
+            : new Map(
+                (rows ?? []).map((r) => [
+                  r.profile_id,
+                  { fix: !!r.fix_requested, manjak: !!r.manjak_sent },
+                ]),
+              ),
+        )
+      })
 
     // Bucket je privatan -> potreban je potpisani URL (traje 2 sata).
     if (data.images?.length) {
@@ -147,15 +218,14 @@ export default function ReportDetail() {
     }
     let active = true
     supabase
-      .from('shift_reports')
-      .select('staff:shift_report_staff ( profile_id )')
+      .from('report_summary')
+      .select('staff_ids')
       .eq('report_date', report.report_date)
       .eq('shift', 'medjusmena')
-      .is('deleted_at', null)
       .then(({ data, error }) => {
         if (!active || error) return
         const ids = new Set()
-        for (const row of data ?? []) for (const s of row.staff ?? []) ids.add(s.profile_id)
+        for (const row of data ?? []) for (const id of row.staff_ids ?? []) ids.add(id)
         setMidIds(ids)
       })
     return () => {
@@ -266,6 +336,25 @@ export default function ReportDetail() {
     () => allRows.filter((i) => i.check_status === 'fali'),
     [allRows],
   )
+
+  /* Sa kojim stanjem je počela sledeća smena — za artikle sa manjkom. */
+  const [nextStart, setNextStart] = useState(() => new Map())
+  const mismatchKey = mismatches.map((i) => i.id).join(',')
+  useEffect(() => {
+    if (!report?.id || mismatches.length === 0) {
+      setNextStart(new Map())
+      return undefined
+    }
+    let active = true
+    supabase.rpc('next_shift_start', { p_report_id: report.id }).then(({ data, error }) => {
+      if (!active || error) return
+      setNextStart(new Map((data ?? []).map((r) => [r.item_name, r])))
+    })
+    return () => {
+      active = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report?.id, mismatchKey])
 
   const isUnsold = (i) => !i.missing && Number(i.qty_sold) === 0
 
@@ -409,6 +498,75 @@ export default function ReportDetail() {
     load()
   }
 
+  const staffIds = () => (report?.staff ?? []).map((s) => s.profile?.id).filter(Boolean)
+
+  function openSend(kind) {
+    const all = new Set(staffIds())
+    // Već poslato nekima? Počinje od njih; inače su svi štiklirani.
+    const sent = flags
+      ? new Set([...flags].filter(([, f]) => (kind === 'manjak' ? f.manjak : f.fix)).map(([pid]) => pid))
+      : new Set()
+    setSendPicked(sent.size > 0 ? sent : all)
+    if (kind === 'manjak') setManjakOpen(true)
+    else setReturnOpen(true)
+  }
+
+  function toggleSend(pid) {
+    setSendPicked((prev) => {
+      const next = new Set(prev)
+      if (next.has(pid)) next.delete(pid)
+      else next.add(pid)
+      return next
+    })
+  }
+
+  /** Upisuje svakom radniku iz smene da li je izabran. Vraća grešku ili null. */
+  async function writeFlags(column, picked) {
+    const results = await Promise.all(
+      staffIds().map((pid) =>
+        supabase
+          .from('shift_report_staff')
+          .update({ [column]: picked.has(pid) })
+          .eq('report_id', id)
+          .eq('profile_id', pid),
+      ),
+    )
+    return results.find((r) => r.error)?.error ?? null
+  }
+
+  async function sendBack() {
+    if (sendPicked.size === 0) {
+      toast.error('Izaberi bar jednog radnika.')
+      return
+    }
+    setWorking(true)
+    const err = await writeFlags('fix_requested', sendPicked)
+    setWorking(false)
+    // Bez skripte -29 nema oznaka — popis se vraća kao pre, svima iz smene.
+    if (err && !/fix_requested/.test(err.message ?? '')) {
+      toast.error(errorMessage(err))
+      return
+    }
+    changeStatus('vracen', adminNote.trim())
+  }
+
+  async function sendManjak() {
+    if (sendPicked.size === 0) {
+      toast.error('Izaberi bar jednog radnika.')
+      return
+    }
+    setWorking(true)
+    const err = await writeFlags('manjak_sent', sendPicked)
+    setWorking(false)
+    if (err) {
+      toast.error(errorMessage(err, 'Manjak nije poslat. Da li je puštena skripta -29?'))
+      return
+    }
+    setManjakOpen(false)
+    toast.success(`Manjak je poslat: ${countLabel(sendPicked.size, 'radnik')}.`)
+    load()
+  }
+
   async function changeStatus(status, note = null) {
     setWorking(true)
     const payload = { status }
@@ -422,7 +580,7 @@ export default function ReportDetail() {
       return
     }
     toast.success(
-      status === 'potvrdjen' ? 'Popis je potvrđen. ✅' : 'Popis je vraćen radniku na ispravku.',
+      status === 'potvrdjen' ? 'Popis je potvrđen. ✅' : 'Popis je vraćen na ispravku.',
     )
     setReturnOpen(false)
     load()
@@ -462,13 +620,11 @@ export default function ReportDetail() {
   }
 
   /**
-   * Potvrđen popis je za radnika zaključan: ostaju mu samo datum i smena,
-   * poruka da iznose vidi admin, ko je radio i dnevna obaveza. Pazar,
-   * popis artikala, slike i napomene se sakrivaju.
-   *
-   * Dok popis nije potvrđen radnik vidi sve — sam ga je i popunio.
+   * Radnik vidi ceo popis i sve podatke i posle potvrde — zato nema
+   * zaključavanja. (Vrati na `!isAdmin && report?.status === 'potvrdjen'`
+   * ako opet treba sakriti iznose potvrđenih popisa.)
    */
-  const lockedForWorker = !isAdmin && report?.status === 'potvrdjen'
+  const lockedForWorker = false
 
   /** Popis ove smene na papiru — `parts` bira šta ulazi. */
   function printReport(parts) {
@@ -596,6 +752,19 @@ export default function ReportDetail() {
   }
 
   const isOwner = report.created_by === profile?.id
+  // Ko sme da vidi ispravku / manjak: admin uvek; radnik samo ako je izabran.
+  // Dok baza nema oznake (ili ih niko nije dobio za ispravku), važi staro: svi iz smene.
+  const myFlag = flags?.get(profile?.id)
+  const anyFix = flags ? [...flags.values()].some((f) => f.fix) : false
+  const fixForMe = flags === null || !anyFix || !!myFlag?.fix
+  const manjakForMe = isAdmin || flags === null || !!myFlag?.manjak
+  const sentTo = (key) =>
+    flags
+      ? [...flags]
+          .filter(([, f]) => f[key])
+          .map(([pid]) => (report.staff ?? []).find((s) => s.profile?.id === pid)?.profile?.full_name)
+          .filter(Boolean)
+      : []
   // Prvo oni koji su radili smenu, pa na kraju oni sa međusmenom.
   const staffList = (report.staff ?? [])
     .filter((s) => s.profile?.id)
@@ -634,8 +803,14 @@ export default function ReportDetail() {
           <div className="flex shrink-0 items-center gap-1.5">
             {/* Potvrđen popis radnik ne preuzima — nema šta da se odštampa. */}
             {!lockedForWorker && (
-              <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
-                Preuzmi
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="Preuzmi popis"
+                title="Preuzmi"
+                onClick={() => setPickerOpen(true)}
+              >
+                <DownloadIcon />
               </Button>
             )}
             <Button variant="secondary" size="sm" onClick={() => navigate(-1)}>
@@ -981,21 +1156,52 @@ export default function ReportDetail() {
           </p>
         ) : (
           <div className="divide-y divide-stone-100">
-            {mismatches.length > 0 && (
+            {mismatches.length > 0 && manjakForMe && (
               <div className="bg-rose-50 px-4 py-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-rose-700">
-                  Stanje se ne poklapa
-                </p>
-                <ul className="mt-1.5 space-y-0.5 text-sm text-rose-900">
-                  {mismatches.map((i) => (
-                    <li key={i.key}>
-                      <b>{i.item_name}</b> · upisano {formatQty(i.qty_end)}
-                      {i.check_qty !== null && i.check_qty !== undefined
-                        ? `, tačno ${formatQty(i.check_qty)}`
-                        : ''}
-                    </li>
-                  ))}
+                <p className="text-xs font-bold uppercase tracking-wide text-rose-700">Manjak</p>
+                <ul className="mt-2 space-y-2.5 text-sm text-rose-900">
+                  {mismatches.map((i) => {
+                    const next = nextStart.get(i.item_name)
+                    const gap = shortageOf(i)
+                    return (
+                      <li key={i.key} className="rounded-xl bg-white/70 px-3 py-2 ring-1 ring-inset ring-rose-200">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <b className="min-w-0 truncate">{i.item_name}</b>
+                          {gap && (
+                            <span className="shrink-0 text-sm font-extrabold tabular-nums text-rose-700">
+                              {gap.label}{gap.amount ? ` ${formatQty(gap.amount)}` : ''}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[12px] text-rose-800">
+                          krajnje {formatQty(i.qty_end)}
+                          {i.check_qty !== null && i.check_qty !== undefined
+                            ? ` · tačno ${formatQty(i.check_qty)}`
+                            : ''}
+                          {next && (
+                            <>
+                              {' · '}
+                              početno sledeće smene ({SHIFT_SHORT[next.next_shift] ?? next.next_shift}{' '}
+                              {formatDate(next.next_date)}) <b>{formatQty(next.next_start)}</b>
+                            </>
+                          )}
+                        </p>
+                      </li>
+                    )
+                  })}
                 </ul>
+                {isAdmin && (
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <p className="min-w-0 text-[12px] text-rose-800">
+                      {sentTo('manjak').length > 0
+                        ? `Poslato: ${sentTo('manjak').join(', ')}`
+                        : 'Radnici ga još ne vide.'}
+                    </p>
+                    <Button size="sm" variant="danger" className="shrink-0" onClick={() => openSend('manjak')}>
+                      {sentTo('manjak').length > 0 ? 'Izmeni' : 'Pošalji manjak'}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
             {visibleGroups.map(([category, catItems]) => {
@@ -1135,13 +1341,13 @@ export default function ReportDetail() {
                                       aria-pressed={item.check_status === 'fali'}
                                       aria-label={`${item.item_name} — stanje se ne poklapa`}
                                       className={cx(
-                                        'h-7 w-7 rounded-lg text-sm font-bold transition',
+                                        'h-7 rounded-lg px-2 text-xs font-bold transition',
                                         item.check_status === 'fali'
                                           ? 'bg-rose-600 text-white'
-                                          : 'bg-stone-100 text-stone-400 hover:bg-rose-50 hover:text-rose-700',
+                                          : 'bg-stone-100 text-stone-500 hover:bg-rose-50 hover:text-rose-700',
                                       )}
                                     >
-                                      ✗
+                                      Manjak
                                     </button>
                                   </div>
                                 ) : (
@@ -1149,11 +1355,11 @@ export default function ReportDetail() {
                                     {item.check_status === 'ok' && (
                                       <span className="text-emerald-700">✓</span>
                                     )}
-                                    {item.check_status === 'fali' && (
+                                    {item.check_status === 'fali' && manjakForMe && (
                                       <span className="text-rose-600">
-                                        ✗{item.check_qty !== null && item.check_qty !== undefined
-                                          ? ` ${formatQty(item.check_qty)}`
-                                          : ''}
+                                        {shortageOf(item)
+                                          ? `${shortageOf(item).label} ${formatQty(shortageOf(item).amount)}`
+                                          : 'manjak'}
                                       </span>
                                     )}
                                   </div>
@@ -1241,9 +1447,24 @@ export default function ReportDetail() {
                   <button
                     type="button"
                     className="block w-full px-4 py-3 text-left text-sm font-semibold text-stone-800 hover:bg-stone-50"
-                    onClick={() => { setMoreOpen(false); setReturnOpen(true) }}
+                    onClick={() => { setMoreOpen(false); openSend('vracen') }}
                   >
                     ↩︎ Vrati na ispravku
+                  </button>
+                  {/* Manjak je uvek u meniju; bez označenih artikala samo kaže šta da uradiš. */}
+                  <button
+                    type="button"
+                    className="block w-full px-4 py-3 text-left text-sm font-semibold text-stone-800 hover:bg-stone-50"
+                    onClick={() => {
+                      setMoreOpen(false)
+                      if (mismatches.length === 0) {
+                        toast.info('Prvo u popisu označi artikle koji fale — dugme „Manjak“ u koloni Provera.', 6000)
+                        return
+                      }
+                      openSend('manjak')
+                    }}
+                  >
+                    ⚠︎ Manjak
                   </button>
                   <button
                     type="button"
@@ -1259,7 +1480,10 @@ export default function ReportDetail() {
         </div>
       )}
 
-      {!isAdmin && isOwner && report.status === 'vracen' && (
+      {!isAdmin &&
+        report.status === 'vracen' &&
+        fixForMe &&
+        (isOwner || staffList.some((s) => s.profile.id === profile?.id)) && (
         <div className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-inset ring-rose-200">
           <p>Admin je vratio ovaj popis na ispravku. Ispravi ga, dodaj sliku ako treba i pošalji ponovo.</p>
           <Button
@@ -1445,9 +1669,9 @@ export default function ReportDetail() {
               variant="danger"
               className="flex-1"
               loading={working}
-              onClick={() => changeStatus('vracen', adminNote.trim())}
+              onClick={sendBack}
             >
-              Vrati radniku
+              Pošalji na ispravku
             </Button>
           </div>
         }
@@ -1460,6 +1684,29 @@ export default function ReportDetail() {
             onChange={(e) => setAdminNote(e.target.value)}
           />
         </Field>
+        <p className="mb-1.5 mt-4 text-[13px] font-semibold text-stone-700">Kome se šalje?</p>
+        <StaffPick list={staffList} picked={sendPicked} onToggle={toggleSend} midIds={midIds} />
+      </Modal>
+
+      <Modal
+        open={manjakOpen}
+        onClose={() => !working && setManjakOpen(false)}
+        title="Pošalji manjak"
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" disabled={working} onClick={() => setManjakOpen(false)}>
+              Otkaži
+            </Button>
+            <Button variant="danger" className="flex-1" loading={working} onClick={sendManjak}>
+              Pošalji
+            </Button>
+          </div>
+        }
+      >
+        <p className="mb-2 text-[13px] text-stone-500">
+          Izabrani radnici vide koji artikli fale i poređenje sa početnim stanjem sledeće smene.
+        </p>
+        <StaffPick list={staffList} picked={sendPicked} onToggle={toggleSend} midIds={midIds} />
       </Modal>
 
       <Modal

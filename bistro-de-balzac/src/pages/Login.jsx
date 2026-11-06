@@ -74,7 +74,7 @@ export default function Login() {
           className="space-y-4 rounded-2xl bg-white p-5 shadow-2xl"
           noValidate
         >
-          <Field label="Ime i prezime" hint="Isto kao što ti je admin upisao nalog.">
+          <Field label="Ime i prezime">
             <Input
               type="text"
               autoComplete="username"

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { renderScheduleCanvas } from '../lib/scheduleImage'
+import DownloadIcon from './DownloadIcon'
 import { Button } from './ui'
 
 const MIN_ZOOM = 1
@@ -69,8 +70,16 @@ export default function ScheduleImage({
           Uvećaj
         </Button>
         {onDownload && (
-          <Button variant="secondary" size="sm" className="flex-1" loading={downloading} onClick={onDownload}>
-            Preuzmi sliku
+          <Button
+            variant="secondary"
+            size="sm"
+            className="flex-1"
+            loading={downloading}
+            aria-label="Preuzmi sliku"
+            title="Preuzmi sliku"
+            onClick={onDownload}
+          >
+            <DownloadIcon />
           </Button>
         )}
       </div>

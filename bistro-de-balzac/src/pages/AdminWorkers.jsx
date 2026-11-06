@@ -17,6 +17,7 @@ import { addPosition, isTrainee, joinPositions, loadPositions, parsePositions } 
 import { currentPeriod, periodLabel } from '../lib/payperiod'
 import AnnouncementAdmin from '../components/AnnouncementAdmin'
 import Avatar, { AvatarEditor } from '../components/Avatar'
+import DownloadIcon from '../components/DownloadIcon'
 import PeriodPicker from '../components/PeriodPicker'
 import ReportPicker from '../components/ReportPicker'
 import { heading, printDocument, statGrid, table } from '../lib/print'
@@ -1311,18 +1312,7 @@ export default function AdminWorkers() {
         >
           Isplati
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full px-1.5 2xl:w-auto 2xl:px-3"
-          onClick={() => {
-            setForm({ payout: '', paid_on: todayISO(), payout_note: '' })
-            setPayoutToRemove(null)
-            setModal({ kind: 'payout', entry: 'bonus', person, calc })
-          }}
-        >
-          Bonus
-        </Button>
+
         {/* Dodela priznanja — spisak bedževa je ispod, u svojoj sekciji. */}
         {badges.length > 0 && (
           <Button
@@ -1369,32 +1359,79 @@ export default function AdminWorkers() {
   return (
     <div className="space-y-4">
       {/* ---------- Obračun za mesec ---------- */}
-      <Card className="p-4">
-        <PeriodPicker period={period} onChange={setPeriod} />
-
-        {/* Jedan veliki broj, a ostalo sitno ispod. Ako je isplaćeno više nego
-            što je zarađeno, ne piše se minus nego „pretplaćeno“. */}
-        <div className="mt-4 flex items-end justify-between gap-3">
-          <div className="min-w-0">
-            <p className="eyebrow">{totals.balance < 0 ? 'Pretplaćeno' : 'Za isplatu'}</p>
-            <p
-              className={cx(
-                'text-3xl font-extrabold tabular-nums tracking-tight',
-                totals.balance < 0 ? 'text-rose-600' : 'text-brand-600',
-              )}
-            >
-              {formatMoney(Math.abs(totals.balance), false)}
-            </p>
-          </div>
-          <Button variant="secondary" size="sm" className="shrink-0" onClick={() => setPickerOpen(true)}>
-            Preuzmi
+      <Card className="p-4 lg:p-5">
+        <div className="flex items-end justify-between gap-3">
+          <PeriodPicker period={period} onChange={setPeriod} className="min-w-0 !w-auto flex-1 sm:!w-[264px] sm:flex-none" />
+          <Button
+            variant="secondary"
+            size="sm"
+            className="shrink-0 !h-[46px] !w-[46px] !px-0"
+            aria-label="Preuzmi obračun"
+            title="Preuzmi"
+            onClick={() => setPickerOpen(true)}
+          >
+            <DownloadIcon className="h-5 w-5" />
           </Button>
         </div>
-        <p className="mt-1.5 text-[13px] tabular-nums text-stone-500">
-          zarađeno {formatMoney(totals.earned, false)}
-          {totals.bonus > 0 && ` · bonus ${formatMoney(totals.bonus, false)}`}
-          {' · '}isplaćeno {formatMoney(totals.paid, false)}
-        </p>
+
+        {/* Jedan veliki broj, a ostalo ispod. Ako je isplaćeno više nego što je
+            zarađeno, ne piše se minus nego „pretplaćeno“. */}
+        {(() => {
+          const owed = totals.earned + totals.bonus
+          const share = owed > 0 ? Math.min(100, Math.max(0, (totals.paid / owed) * 100)) : 0
+          const over = totals.balance < 0
+          return (
+            <>
+              <div className="mt-4 rounded-2xl bg-ink px-4 py-4 text-white lg:flex lg:items-center lg:justify-between lg:gap-8 lg:px-6">
+                <div className="min-w-0">
+                  <p className="eyebrow text-stone-400">{over ? 'Pretplaćeno' : 'Za isplatu'}</p>
+                  <p
+                    className={cx(
+                      'mt-0.5 text-4xl font-extrabold tabular-nums tracking-tight',
+                      over ? 'text-rose-400' : 'text-white',
+                    )}
+                  >
+                    {formatMoney(Math.abs(totals.balance), false)}
+                  </p>
+                </div>
+
+                <div className="mt-4 lg:mt-0 lg:w-80">
+                  <div
+                    className="h-2 overflow-hidden rounded-full bg-white/15"
+                    role="progressbar"
+                    aria-label="Koliko je već isplaćeno"
+                    aria-valuenow={Math.round(share)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <div
+                      className={cx('h-full rounded-full transition-all', over ? 'bg-rose-400' : 'bg-brand-500')}
+                      style={{ width: `${share}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[12px] tabular-nums text-stone-400">
+                    isplaćeno {formatMoney(totals.paid, false)} od {formatMoney(owed, false)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-2.5 grid grid-cols-3 gap-2">
+                {[
+                  ['Zarađeno', totals.earned],
+                  ['Bonus', totals.bonus],
+                  ['Isplaćeno', totals.paid],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-2xl bg-stone-100 px-3 py-2.5 text-center">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500">{label}</p>
+                    <p className="mt-0.5 text-[15px] font-extrabold tabular-nums text-stone-900">
+                      {formatMoney(value, false)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )
+        })()}
       </Card>
 
       {/* ---------- Radnici ---------- */}
@@ -2526,10 +2563,39 @@ export default function AdminWorkers() {
           setPayoutToRemove(null)
           setModal(null)
         }}
-        title={`${modal?.entry === 'bonus' ? 'Bonus' : 'Isplata'} — ${modal?.person?.full_name ?? ''}`}
+        title={`Isplata — ${modal?.person?.full_name ?? ''}`}
       >
         {modal?.kind === 'payout' && (
           <form onSubmit={savePayout} className="space-y-4">
+            {/* Isplata i bonus su u istom prozoru — biraš šta upisuješ. */}
+            <div className="grid grid-cols-2 gap-1 rounded-xl bg-stone-100 p-1" role="group" aria-label="Vrsta upisa">
+              {[
+                ['isplata', 'Isplata'],
+                ['bonus', 'Bonus'],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={modal.entry === key}
+                  onClick={() => {
+                    if (modal.entry === key) return
+                    setModal((m) => ({ ...m, entry: key }))
+                    setForm((f) => ({
+                      ...f,
+                      payout: key === 'isplata' && modal.calc.balance > 0 ? String(modal.calc.balance) : '',
+                      payout_note: key === 'isplata' ? `Dnevnice ${periodLabel(period)}` : '',
+                    }))
+                  }}
+                  className={cx(
+                    'rounded-lg py-2 text-sm font-bold transition',
+                    modal.entry === key ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
             <div className="rounded-xl bg-stone-50 px-4 py-3 text-sm">
               <div className="flex justify-between py-0.5">
                 <span className="text-stone-600">

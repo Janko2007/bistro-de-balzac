@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import {
   currentPeriod,
@@ -31,9 +31,24 @@ function monthTitle(period) {
  * meseci. Izabrani period je narandžasta pločica, a onaj u toku je samo
  * obojen — bez okvira i linija, da meni bude čist.
  */
-export default function PeriodPicker({ period, onChange, className, since = '' }) {
+export default function PeriodPicker({ period, onChange, className, since = '', inline = false }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef(null)
+
+  // Godina se piše samo ako staje u polje; inače ostaje „1–15. novembar“.
+  const boxRef = useRef(null)
+  const fullRef = useRef(null)
+  const [noYear, setNoYear] = useState(false)
+  const fullLabel = periodLabel(period)
+  useLayoutEffect(() => {
+    const fit = () => {
+      if (!boxRef.current || !fullRef.current) return
+      setNoYear(fullRef.current.offsetWidth > boxRef.current.clientWidth)
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [fullLabel])
 
   // `since` (YYYY-MM-DD): od kad je radnik u kolektivu — ranijih perioda nema.
   const months = useMemo(() => {
@@ -119,8 +134,15 @@ export default function PeriodPicker({ period, onChange, className, since = '' }
   }
 
   return (
-    <div ref={rootRef} className={cx('relative w-[264px] max-w-full shrink-0', className)}>
-      <p className="label" id="period-label">
+    <div
+      ref={rootRef}
+      className={cx(
+        'relative',
+        inline ? 'flex w-full items-center gap-3' : 'w-[264px] max-w-full shrink-0',
+        className,
+      )}
+    >
+      <p className={cx('label', inline && 'mb-0 shrink-0')} id="period-label">
         Obračunski period
       </p>
 
@@ -130,11 +152,22 @@ export default function PeriodPicker({ period, onChange, className, since = '' }
         aria-expanded={open}
         aria-labelledby="period-label"
         className={cx(
-          'flex w-full items-center justify-between gap-2 rounded-xl border bg-white px-3 py-2.5 text-left text-base text-stone-900 transition',
+          'flex items-center justify-between gap-2 rounded-xl border bg-white px-3 py-2.5 text-left text-base text-stone-900 transition',
+          inline ? 'min-w-0 flex-1' : 'w-full',
           open ? 'border-brand-500 ring-2 ring-brand-500/25' : 'border-stone-300',
         )}
       >
-        <span className="truncate">{periodLabel(period)}</span>
+        <span ref={boxRef} className="relative min-w-0 flex-1 truncate">
+          {noYear ? periodLabel(period, false) : fullLabel}
+          {/* Nevidljivo merilo: koliko bi zauzeo pun naziv, sa godinom. */}
+          <span
+            ref={fullRef}
+            aria-hidden="true"
+            className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap"
+          >
+            {fullLabel}
+          </span>
+        </span>
         <svg
           className={cx('h-4 w-4 shrink-0 text-stone-400 transition-transform', open && 'rotate-180')}
           viewBox="0 0 24 24"

@@ -1,9 +1,10 @@
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom'
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { APP_NAME } from '../lib/supabaseClient'
 import { cx } from '../lib/utils'
 import { clearPersistedState } from '../lib/persist'
+import { detectPlatform } from '../lib/platform'
 import { getPayPeriod, loadPayPeriod } from '../lib/payperiod'
 import { deriveTheme, useThemeColor } from '../lib/theme'
 import Avatar from './Avatar'
@@ -95,12 +96,40 @@ function useScrollMemory() {
   }, [location.key, location.pathname, navType])
 }
 
+/**
+ * Donja traka prema telefonu:
+ *   iPhone  — providna, mutna traka bez senke; izabrana sekcija u maloj blagoj pločici
+ *   Android — puna bela traka sa blagom senkom; izabrana sekcija u većoj zaobljenoj pločici
+ *   ostalo  — kako je bilo
+ */
+const NAV_LOOK = {
+  ios: {
+    bar: 'border-t border-black/5 bg-white/70 backdrop-blur-2xl',
+    pill: 'h-9 w-14 rounded-xl',
+    pillOn: 'bg-brand-100/60',
+    icon: 'h-[25px] w-[25px]',
+  },
+  android: {
+    bar: 'border-t border-stone-200 bg-white shadow-[0_-3px_10px_-4px_rgba(28,25,23,0.22)]',
+    pill: 'h-8 w-16 rounded-full',
+    pillOn: 'bg-brand-100',
+    icon: 'h-6 w-6',
+  },
+  other: {
+    bar: 'border-t border-stone-200/80 bg-white/90 shadow-[0_-8px_24px_-12px_rgba(28,25,23,0.18)] backdrop-blur-xl',
+    pill: 'h-11 w-[72px] rounded-2xl',
+    pillOn: 'bg-brand-100/80 shadow-sm',
+    icon: 'h-[26px] w-[26px]',
+  },
+}
+
 export default function Layout() {
   const { profile, isAdmin, signOut } = useAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
 
   useScrollMemory()
+  const look = NAV_LOOK[useMemo(detectPlatform, [])]
 
   // Obračunski period podešava admin — učitava se pri prijavi, pa se ekran osveži.
   const [periodVersion, setPeriodVersion] = useState(0)
@@ -166,11 +195,10 @@ export default function Layout() {
             alt=""
             className="h-9 w-9 shrink-0 rounded-lg"
           />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold leading-tight">{APP_NAME}</p>
-            <p className="truncate text-xs text-stone-400" style={theme ? { color: theme.headerSub } : undefined}>
-              {isAdmin ? 'Admin' : 'Radnik'} · {profile?.full_name}
-            </p>
+          {/* Naziv je na sredini; logo levo i slika profila desno su iste širine.
+              Na računaru, gde stoji i navigacija, naziv ostaje uz logo. */}
+          <div className="min-w-0 flex-1 text-center lg:text-left">
+            <p className="truncate text-[15px] font-bold leading-tight">{APP_NAME}</p>
           </div>
 
           {/* Desktop navigacija */}
@@ -216,15 +244,35 @@ export default function Layout() {
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
                 <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-stone-200 bg-white text-stone-900 shadow-xl">
-                  <div className="border-b border-stone-100 px-4 py-3">
-                    <p className="truncate text-sm font-bold">{profile?.full_name}</p>
+                  <div className="flex flex-col items-center gap-2 border-b border-stone-100 px-4 pb-3.5 pt-4 text-center">
+                    <Avatar
+                      name={profile?.full_name}
+                      path={profile?.avatar_path}
+                      className="h-12 w-12 bg-stone-200 text-base text-stone-700"
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold leading-tight">{profile?.full_name}</p>
+                      <p className="mt-0.5 text-xs text-stone-400">{isAdmin ? 'Admin' : 'Radnik'}</p>
+                    </div>
                   </div>
                   <div className="p-2">
                     <button
                       type="button"
                       onClick={handleSignOut}
-                      className="w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50 active:bg-rose-100"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-rose-600 transition hover:bg-rose-50 active:bg-rose-100"
                     >
+                      <svg
+                        className="h-4 w-4 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.25"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+                      </svg>
                       Odjavi se
                     </button>
                   </div>
@@ -251,7 +299,7 @@ export default function Layout() {
       {/* Fiksna visina i zabranjen prelom teksta — dugmad stoje na istom
           mestu bez obzira na to koja je sekcija otvorena. */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-stone-200/80 bg-white/90 shadow-[0_-8px_24px_-12px_rgba(28,25,23,0.18)] backdrop-blur-xl safe-bottom lg:hidden"
+        className={cx('fixed inset-x-0 bottom-0 z-30 safe-bottom lg:hidden', look.bar)}
         style={theme ? { backgroundColor: theme.navBg, borderColor: theme.navBorder } : undefined}
       >
         <div className="mx-auto flex max-w-lg px-1.5">
@@ -276,15 +324,15 @@ export default function Layout() {
                   {/* Aktivna sekcija: znak u blagoj pločici boje aplikacije. */}
                   <span
                     className={cx(
-                      'flex items-center justify-center rounded-2xl transition-all duration-200',
-                      'h-11 w-[72px]',
-                      isActive ? 'bg-brand-100/80 shadow-sm' : 'group-active:bg-stone-100',
+                      'flex items-center justify-center transition-all duration-200',
+                      look.pill,
+                      isActive ? look.pillOn : 'group-active:bg-stone-100',
                     )}
                     style={isActive && theme ? { backgroundColor: `${theme.navActive}24` } : undefined}
                   >
                     <Icon
                       path={item.icon}
-                      className={cx('h-[26px] w-[26px]', isActive && 'scale-105')}
+                      className={cx(look.icon, isActive && 'scale-105')}
                     />
                   </span>
                 </>

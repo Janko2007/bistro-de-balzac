@@ -14,8 +14,12 @@ const STEP = 3
 const FILTERS = [
   { key: '', label: 'Svi' },
   { key: 'potvrdjen', label: 'Potvrđen' },
+  { key: 'poslat', label: 'Čeka potvrdu' },
   { key: 'vracen', label: 'Vraćen na ispravku' },
+  { key: 'manjak', label: 'Manjak' },
 ]
+
+const NO_ID = '00000000-0000-0000-0000-000000000000'
 
 /**
  * Moji izveštaji — red na Profilu koji se otvara klikom, ispod „Bonusi i
@@ -34,9 +38,12 @@ export default function MyReportsFold() {
   const [debounced, setDebounced] = useState(search)
 
   const [total, setTotal] = useState(null)
+  const [confirmed, setConfirmed] = useState(null)
   const [reports, setReports] = useState([])
   const [found, setFound] = useState(0)
   const [loading, setLoading] = useState(false)
+  // Šta čeka radnika: izveštaji sa manjkom koji mu je poslat i oni vraćeni na ispravku.
+  const [alerts, setAlerts] = useState({ manjak: new Set(), fix: new Set() })
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(search), 300)
@@ -60,6 +67,60 @@ export default function MyReportsFold() {
       .select('id', { count: 'exact', head: true })
       .contains('staff_ids', [profile.id])
       .then(({ count }) => setTotal(count ?? 0))
+    supabase
+      .from('report_summary')
+      .select('id', { count: 'exact', head: true })
+      .contains('staff_ids', [profile.id])
+      .eq('status', 'potvrdjen')
+      .then(({ count }) => setConfirmed(count ?? 0))
+  }, [profile?.id])
+
+  // Sve potvrđeno, ništa ne čeka — zaglavlje je zeleno.
+  const allConfirmed =
+    total !== null &&
+    total > 0 &&
+    confirmed === total &&
+    alerts.manjak.size === 0 &&
+    alerts.fix.size === 0
+
+  /* Crveno (manjak) ili narandžasto (vraćen na ispravku) na zaglavlju — vidi se i
+     dok je red zatvoren. Radnik dobija oznaku samo ako ju je admin poslao baš njemu. */
+  useEffect(() => {
+    if (!profile?.id) return undefined
+    let active = true
+    Promise.all([
+      supabase.from('report_summary').select('id').contains('staff_ids', [profile.id]).eq('status', 'vracen'),
+      supabase.from('shift_report_items').select('report_id').eq('check_status', 'fali').limit(1000),
+      supabase
+        .from('shift_report_staff')
+        .select('report_id, profile_id, fix_requested, manjak_sent')
+        .limit(3000),
+    ]).then(([returned, short, staff]) => {
+      if (!active) return
+      // Baza bez oznaka (skripta -29): važi staro — vide svi iz smene.
+      const rows = staff.error ? null : (staff.data ?? [])
+      const mine = (rid) => rows?.find((r) => r.report_id === rid && r.profile_id === profile.id)
+
+      const manjak = new Set()
+      for (const row of short.error ? [] : (short.data ?? [])) {
+        if (rows === null || mine(row.report_id)?.manjak_sent) manjak.add(row.report_id)
+      }
+
+      const fix = new Set()
+      for (const row of returned.error ? [] : (returned.data ?? [])) {
+        if (rows === null) {
+          fix.add(row.id)
+          continue
+        }
+        const sameReport = rows.filter((r) => r.report_id === row.id)
+        const anyFix = sameReport.some((r) => r.fix_requested)
+        if (!anyFix || mine(row.id)?.fix_requested) fix.add(row.id)
+      }
+      setAlerts({ manjak, fix })
+    })
+    return () => {
+      active = false
+    }
   }, [profile?.id])
 
   // Učitava se tek kad se red otvori.
@@ -76,7 +137,8 @@ export default function MyReportsFold() {
       .contains('staff_ids', [profile.id])
       .range(0, limit - 1)
 
-    if (filter) query = query.eq('status', filter)
+    if (filter === 'manjak') query = query.in('id', alerts.manjak.size ? [...alerts.manjak] : [NO_ID])
+    else if (filter) query = query.eq('status', filter)
     if (dateSearch) query = query.gte('report_date', dateSearch.from).lte('report_date', dateSearch.to)
 
     query.then(({ data, count, error }) => {
@@ -91,7 +153,7 @@ export default function MyReportsFold() {
     return () => {
       active = false
     }
-  }, [open, limit, filter, dateSearch, toast, profile?.id])
+  }, [open, limit, filter, dateSearch, toast, profile?.id, alerts])
 
   const remaining = Math.max(0, found - reports.length)
 
@@ -118,7 +180,39 @@ export default function MyReportsFold() {
         >
           <path d="M9 18l6-6-6-6" />
         </svg>
-        <span className="min-w-0 flex-1 text-base font-extrabold tracking-tight text-stone-900">Moji izveštaji</span>
+        <span
+          className={cx(
+            'min-w-0 flex-1 text-base font-extrabold tracking-tight',
+            alerts.manjak.size > 0
+              ? 'text-rose-600'
+              : alerts.fix.size > 0
+                ? 'text-brand-700'
+                : allConfirmed
+                  ? 'text-emerald-700'
+                  : 'text-stone-900',
+          )}
+        >
+          Moji izveštaji
+        </span>
+        {(alerts.manjak.size > 0 || alerts.fix.size > 0) && (
+          <span
+            title={alerts.manjak.size > 0 ? 'Imaš manjak' : 'Popis je vraćen na ispravku'}
+            className={cx(
+              'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[12px] font-extrabold text-white',
+              alerts.manjak.size > 0 ? 'bg-rose-600' : 'bg-brand-600',
+            )}
+          >
+            !
+          </span>
+        )}
+        {allConfirmed && (
+          <span
+            title="Svi izveštaji su potvrđeni"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[12px] font-extrabold text-white"
+          >
+            ✓
+          </span>
+        )}
         {total !== null && (
           <span className="shrink-0 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-stone-500">
             {total}
@@ -139,13 +233,16 @@ export default function MyReportsFold() {
                 className={cx(
                   'rounded-full px-3 py-1.5 text-xs font-semibold transition',
                   filter === f.key
-                    ? f.key === 'vracen'
+                    ? f.key === 'manjak'
                       ? 'bg-rose-600 text-white'
-                      : 'bg-ink text-white'
+                      : f.key === 'vracen'
+                        ? 'bg-brand-600 text-white'
+                        : 'bg-ink text-white'
                     : 'bg-stone-100 text-stone-600 hover:bg-stone-200',
                 )}
               >
                 {f.label}
+                {f.key === 'manjak' && alerts.manjak.size > 0 ? ` ${alerts.manjak.size}` : ''}
               </button>
             ))}
           </div>
@@ -197,7 +294,12 @@ export default function MyReportsFold() {
           ) : (
             <div className={cx('divide-y divide-stone-100 transition', loading && 'opacity-60')}>
               {reports.map((report) => (
-                <ReportListItem key={report.id} report={report} compact />
+                <ReportListItem
+                  key={report.id}
+                  report={report}
+                  compact
+                  alert={alerts.manjak.has(report.id) ? 'manjak' : alerts.fix.has(report.id) ? 'fix' : null}
+                />
               ))}
             </div>
           )}

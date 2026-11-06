@@ -4,7 +4,7 @@ import { supabase } from './supabaseClient'
  * Obaveštenja — admin ih šalje svima ili jednoj osobi; radnik ih vidi jednom
  * (kad se prijavi ili otvori aplikaciju), a posle ostaju sačuvana u Profilu.
  *
- * Bedž i radnik meseca prave obaveštenje sami (okidači u bazi).
+ * Obaveštenja se ne prave sama — radnik dobija samo ono što admin pošalje.
  */
 
 export const KINDS = {

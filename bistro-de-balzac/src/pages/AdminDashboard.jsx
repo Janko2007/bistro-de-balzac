@@ -13,9 +13,8 @@ import {
   Input,
   Select,
   Spinner,
-  Stat,
-  StatRow,
 } from '../components/ui'
+import DownloadIcon from '../components/DownloadIcon'
 import ReportListItem from '../components/ReportListItem'
 import { displayNames } from '../lib/scheduleImage'
 import ReportPicker from '../components/ReportPicker'
@@ -209,19 +208,56 @@ export default function AdminDashboard() {
     [shortById, midByDate],
   )
 
+  /* Brzi izbor iz zbirnog bloka: čeka potvrdu / vraćeni na ispravku / manjak.
+     Izdvaja samo te izveštaje u listi; brojevi iznad ostaju za ceo period. */
+  const [quick, setQuick] = useState('')
+
+  // Izveštaji kojima je poslat manjak (artikli označeni + izabrani radnici).
+  const [manjakIds, setManjakIds] = useState(() => new Set())
+  const reportKey = reports.map((r) => r.id).join(',')
+  useEffect(() => {
+    if (reports.length === 0) {
+      setManjakIds(new Set())
+      return undefined
+    }
+    let active = true
+    const ids = reports.map((r) => r.id)
+    Promise.all([
+      supabase.from('shift_report_items').select('report_id').eq('check_status', 'fali').in('report_id', ids),
+      supabase.from('shift_report_staff').select('report_id').eq('manjak_sent', true).in('report_id', ids),
+    ]).then(([short, sent]) => {
+      if (!active || short.error) return
+      const marked = new Set((short.data ?? []).map((x) => x.report_id))
+      // Baza bez oznaka (skripta -29): računa se svaki izveštaj sa označenim manjkom.
+      const delivered = sent.error ? null : new Set((sent.data ?? []).map((x) => x.report_id))
+      setManjakIds(new Set([...marked].filter((id) => delivered === null || delivered.has(id))))
+    })
+    return () => {
+      active = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportKey])
+
+  const returnedCount = reports.filter((r) => r.status === 'vracen').length
+  const visibleReports = useMemo(() => {
+    if (quick === 'manjak') return reports.filter((r) => manjakIds.has(r.id))
+    if (quick) return reports.filter((r) => r.status === quick)
+    return reports
+  }, [reports, quick, manjakIds])
+
   /**
    * Grupisanje po datumu za pregledniju listu.
    * Unutar dana smene idu redom kako se rade: prva, međusmena, druga.
    */
   const byDate = useMemo(() => {
     const map = new Map()
-    for (const r of reports) {
+    for (const r of visibleReports) {
       if (!map.has(r.report_date)) map.set(r.report_date, [])
       map.get(r.report_date).push(r)
     }
     for (const list of map.values()) list.sort((a, b) => shiftRank(a.shift) - shiftRank(b.shift))
     return Array.from(map.entries())
-  }, [reports])
+  }, [visibleReports])
 
   function applyQuickRange(range) {
     setFrom(range.from())
@@ -448,38 +484,42 @@ export default function AdminDashboard() {
         </button>
 
         {filtersOpen && (
-          <div className="space-y-3 border-t border-stone-200 p-4">
-            <div className="space-y-2 md:flex md:flex-wrap md:gap-2 md:space-y-0">
-              {[QUICK_RANGES.slice(0, 3), QUICK_RANGES.slice(3)].map((group, gi) => (
-                <div key={gi} className="flex flex-nowrap gap-1.5 md:contents">
-              {group.map((range) => {
-                const active = from === range.from() && to === range.to()
-                return (
-                  <button
-                    key={range.label}
-                    type="button"
-                    onClick={() => applyQuickRange(range)}
-                    className={cx(
-                      'whitespace-nowrap rounded-full px-2.5 py-1.5 text-[13px] font-semibold transition ring-1 ring-inset md:px-3.5 md:text-sm',
-                      active
-                        ? 'bg-ink text-white ring-ink'
-                        : 'bg-white text-stone-700 ring-stone-300 hover:bg-stone-50',
-                    )}
-                  >
-                    {range.label}
-                  </button>
-                )
-              })}
-                </div>
-              ))}
+          <div className="space-y-4 border-t border-stone-200 p-4">
+            {/* Brzi izbor perioda: šest jednakih dugmadi u dva reda (na računaru u jednom). */}
+            <div>
+              <p className="label">Period</p>
+              <div className="grid grid-cols-3 gap-1.5 md:grid-cols-6">
+                {QUICK_RANGES.map((range) => {
+                  const active = from === range.from() && to === range.to()
+                  return (
+                    <button
+                      key={range.label}
+                      type="button"
+                      onClick={() => applyQuickRange(range)}
+                      aria-pressed={active}
+                      className={cx(
+                        'whitespace-nowrap rounded-xl px-1 py-2 text-[13px] font-semibold transition',
+                        active
+                          ? 'bg-ink text-white'
+                          : 'bg-stone-100 text-stone-700 hover:bg-stone-200/70',
+                      )}
+                    >
+                      {range.label}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
-            {/* Proizvoljan period — polja govore sama za sebe, bez naslova. */}
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Od">
+            {/* Proizvoljan period — dva datuma spojena u jedan red. */}
+            <div className="flex items-end gap-2">
+              <Field label="Od" className="min-w-0 flex-1">
                 <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
               </Field>
-              <Field label="Do">
+              <span className="pb-3 text-stone-300" aria-hidden="true">
+                →
+              </span>
+              <Field label="Do" className="min-w-0 flex-1">
                 <Input
                   type="date"
                   value={to}
@@ -520,31 +560,113 @@ export default function AdminDashboard() {
               </Field>
             </div>
 
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button variant="secondary" size="sm" onClick={() => setFiltersOpen(false)}>
-                Zatvori
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <Button variant="secondary" onClick={resetFilters} disabled={extraCount === 0}>
+                Poništi
               </Button>
-              {extraCount > 0 && (
-                <Button variant="ghost" size="sm" onClick={resetFilters}>
-                  Poništi
-                </Button>
-              )}
+              <Button onClick={() => setFiltersOpen(false)}>Gotovo</Button>
             </div>
           </div>
         )}
       </Card>
-
       {/* ---------- Zbirni podaci ---------- */}
-      {/* Redosled svuda isti: pazar, kartice, predato. Dinari se ne pišu — svi
-          iznosi u aplikaciji su u dinarima. */}
-      <StatRow className="grid-cols-2 sm:grid-cols-4">
-        <Stat label="Pazar" value={formatMoney(totals.total, false)} tone="total" />
-        <Stat label="Kartice" value={formatMoney(totals.card, false)} />
-        <Stat label="Predato" value={formatMoney(totals.cash, false)} />
-        <Stat label="Čeka" value={totals.pending} sub={`od ${reports.length}`} />
-      </StatRow>
+      {/* Pazar je veliki broj, a ispod njega se vidi kako se deli na kartice i
+          predato. Dinari se ne pišu — svi iznosi u aplikaciji su u dinarima. */}
+      <Card className="p-4">
+        {(() => {
+          // Keš je prvi i narandžast; kartice su drugi, beli deo trake.
+          const cashShare = totals.total > 0 ? Math.min(100, Math.max(0, (totals.cash / totals.total) * 100)) : 0
+          const cardShare = totals.total > 0 ? 100 - cashShare : 0
+          const shownTiles =
+            1 +
+            [totals.pending, returnedCount, manjakIds.size].filter((n, i) => n > 0 || quick === ['poslat', 'vracen', 'manjak'][i]).length
+          return (
+            <>
+              <div className="rounded-2xl bg-ink px-4 py-4 text-white">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="eyebrow text-stone-400">Pazar</p>
+                  <p className="min-w-0 truncate text-[12px] text-stone-400">{filterSummary}</p>
+                </div>
+                <p className="mt-0.5 text-4xl font-extrabold tabular-nums tracking-tight">
+                  {formatMoney(totals.total, false)}
+                </p>
 
-      {/* ---------- Lista izveštaja ---------- */}
+                <div
+                  className="mt-3 flex h-2 overflow-hidden rounded-full bg-white/15"
+                  role="img"
+                  aria-label={`Keš ${Math.round(cashShare)}%, kartice ${Math.round(cardShare)}%`}
+                >
+                  <div className="h-full bg-brand-500 transition-all" style={{ width: `${cashShare}%` }} />
+                  <div className="h-full bg-white/80 transition-all" style={{ width: `${cardShare}%` }} />
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-[12px] tabular-nums text-stone-300">
+                  <span className="flex items-center gap-1.5 font-bold text-brand-400">
+                    <span className="h-2 w-2 rounded-full bg-brand-500" aria-hidden="true" />
+                    keš {formatMoney(totals.cash, false)}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-white/80" aria-hidden="true" />
+                    kartice {formatMoney(totals.card, false)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Klik na pločicu izdvaja te izveštaje u listi ispod; drugi klik skida izbor. */}
+              <div
+                className={cx(
+                  'mt-2.5 grid gap-2',
+                  // Pločice razvlače da popune ceo red — bez praznog mesta.
+                  shownTiles === 1 && 'grid-cols-1',
+                  shownTiles === 2 && 'grid-cols-2',
+                  shownTiles === 3 && 'grid-cols-3',
+                  shownTiles >= 4 && 'grid-cols-2 sm:grid-cols-4',
+                )}
+              >
+                {[
+                  { key: '', label: 'Izveštaja', value: reports.length, tone: 'plain' },
+                  { key: 'poslat', label: 'Čeka potvrdu', value: totals.pending, tone: 'brand' },
+                  { key: 'vracen', label: 'Vraćeno na ispravku', value: returnedCount, tone: 'amber' },
+                  { key: 'manjak', label: 'Manjak', value: manjakIds.size, tone: 'rose' },
+                ]
+                  // Pločica se vidi samo kad ima šta da pokaže; „Izveštaja“ je uvek tu.
+                  .filter((tile) => tile.key === '' || tile.value > 0 || quick === tile.key)
+                  .map((tile) => {
+                  const on = quick === tile.key
+                  const lit = tile.value > 0 && tile.tone !== 'plain'
+                  const palette = {
+                    brand: 'bg-brand-50 text-brand-700 ring-brand-600/25',
+                    amber: 'bg-amber-50 text-amber-800 ring-amber-600/25',
+                    rose: 'bg-rose-50 text-rose-700 ring-rose-600/25',
+                  }
+                  return (
+                    <button
+                      key={tile.label}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => setQuick(tile.key === '' || on ? '' : tile.key)}
+                      className={cx(
+                        'rounded-2xl px-2 py-2.5 text-center transition ring-1 ring-inset',
+                        lit ? palette[tile.tone] : 'bg-stone-100 text-stone-900 ring-transparent hover:bg-stone-200/70',
+                        on && '!ring-stone-700',
+                      )}
+                    >
+                      <p className={cx('text-[10px] font-bold uppercase leading-tight tracking-wide', lit ? '' : 'text-stone-500')}>
+                        {tile.label}
+                      </p>
+                      <p className="mt-0.5 text-[15px] font-extrabold tabular-nums">
+                        {tile.value}
+                        {tile.key === 'poslat' && (
+                          <span className="ml-1 text-[11px] font-semibold text-stone-400">od {reports.length}</span>
+                        )}
+                      </p>
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )
+        })()}
+      </Card>      {/* ---------- Lista izveštaja ---------- */}
       <Card>
         <CardHeader
           title="Izveštaji smena"
@@ -555,14 +677,20 @@ export default function AdminDashboard() {
                 ? dateSearch.from === dateSearch.to
                   ? formatDate(dateSearch.from)
                   : `${formatDate(dateSearch.from)} – ${formatDate(dateSearch.to)}`
-                : `${reports.length}`
+                : `${visibleReports.length}${quick ? ` od ${reports.length}` : ''}`
           }
           action={
             <div className="flex shrink-0 items-center gap-1">
               {reports.length > 0 && (
                 <>
-                  <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
-                    Preuzmi
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-label="Preuzmi izveštaje"
+                    title="Preuzmi"
+                    onClick={() => setPickerOpen(true)}
+                  >
+                    <DownloadIcon />
                   </Button>
                   <Button variant="secondary" size="sm" onClick={exportCsv}>
                     CSV
@@ -617,7 +745,7 @@ export default function AdminDashboard() {
           <div className="flex justify-center py-14">
             <Spinner className="h-7 w-7 text-brand-600" />
           </div>
-        ) : reports.length === 0 ? (
+        ) : visibleReports.length === 0 ? (
           <EmptyState
             icon="🗂️"
             title="Nema izveštaja"
@@ -628,20 +756,30 @@ export default function AdminDashboard() {
             {byDate.map(([date, dayReports]) => {
               const dayTotal = dayReports.reduce((s, r) => s + Number(r.total_amount ?? 0), 0)
               return (
-                <div key={date}>
-                  <div className="flex items-center justify-between border-b border-stone-100 px-4 pb-1.5 pt-4">
-                    <span className="eyebrow">
-                      {new Intl.DateTimeFormat(LOCALE, {
-                        weekday: 'long',
-                        day: '2-digit',
-                        month: '2-digit',
-                      }).format(new Date(`${date}T00:00:00`))}
+                <div key={date} className="border-t-[6px] border-stone-200/70 first:border-t-0">
+                  <div className="flex items-center justify-between gap-3 border-b border-stone-200 bg-stone-50 px-4 py-2">
+                    <span className="min-w-0 truncate">
+                      <span className="text-[13px] font-extrabold capitalize text-stone-900">
+                        {new Intl.DateTimeFormat(LOCALE, { weekday: 'long' }).format(new Date(`${date}T00:00:00`))}
+                      </span>
+                      <span className="ml-2 text-[12px] font-medium tabular-nums text-stone-400">
+                        {new Intl.DateTimeFormat(LOCALE, { day: '2-digit', month: '2-digit' }).format(
+                          new Date(`${date}T00:00:00`),
+                        )}
+                      </span>
                     </span>
-                    <span className="text-[12px] font-bold tabular-nums text-stone-500">
+                    <span className="shrink-0 rounded-full bg-white px-2.5 py-0.5 text-[12px] font-extrabold tabular-nums text-stone-700 ring-1 ring-inset ring-stone-200">
                       {formatMoney(dayTotal, false)}
                     </span>
                   </div>
-                  <div className="divide-y divide-stone-100">
+                  {/* Na računaru su dve smene istog dana jedna pored druge; na telefonu jedna ispod druge. */}
+                  <div
+                    className={cx(
+                      'divide-y divide-stone-100',
+                      dayReports.length > 1 &&
+                        'md:grid md:grid-cols-2 md:divide-y-0 md:[&>a]:border-t md:[&>a]:border-stone-100 md:[&>a:nth-child(even)]:border-l md:[&>a:nth-child(-n+2)]:border-t-0',
+                    )}
+                  >
                     {dayReports.map((report) => (
                       <ReportListItem
                         key={report.id}

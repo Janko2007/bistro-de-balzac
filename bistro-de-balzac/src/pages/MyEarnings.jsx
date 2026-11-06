@@ -89,16 +89,6 @@ export default function MyEarnings() {
 
   const calc = settle(profile, stats)
 
-  /* Sitan red ispod iznosa: dani, procenat, bonus, isplaćeno — samo ono što postoji. */
-  const detail = [
-    calc.model === 'plata' ? `plata ${formatMoney(calc.base, false)}` : `${calc.days} ${plural(calc.days, 'dan')}`,
-    calc.fromPercent > 0 ? `procenat ${formatMoney(calc.fromPercent, false)}` : null,
-    calc.bonus > 0 ? `bonus ${formatMoney(calc.bonus, false)}` : null,
-    `isplaćeno ${formatMoney(calc.paid, false)}`,
-  ]
-    .filter(Boolean)
-    .join(' · ')
-
   /* Uslovi rada (ranije ispod imena): dnevnica ili plata, procenat, u timu od. */
   const percent = Number(profile?.percent ?? 0)
   const terms = [
@@ -119,34 +109,76 @@ export default function MyEarnings() {
         <PeriodPicker
           period={period}
           onChange={setPeriod}
+          inline
           since={profile?.created_at?.slice(0, 10) ?? ''}
         />
 
         {loading ? (
           <FullPageLoader />
         ) : (
-          <div className="mt-4">
-            {/* Ako je primio više nego što je zaradio, piše se rečju — minus
-                uz „imaš da primiš“ se čita kao greška. */}
-            <p className="eyebrow">{calc.balance < 0 ? 'Primio si više' : 'Imaš da primiš'}</p>
-            <p
-              className={cx(
-                'text-3xl font-extrabold tabular-nums tracking-tight',
-                calc.balance < 0 ? 'text-rose-600' : 'text-brand-600',
-              )}
-            >
-              {formatMoney(Math.abs(calc.balance), false)}
-            </p>
-            <p className="mt-1.5 text-[13px] tabular-nums text-stone-500">{detail}</p>
-            <p className="mt-1 text-[12px] tabular-nums text-stone-400">{terms}</p>
+          (() => {
+            const earned = Number(calc.base ?? 0) + Number(calc.fromPercent ?? 0)
+            const owed = earned + Number(calc.bonus ?? 0)
+            const share = owed > 0 ? Math.min(100, Math.max(0, (Number(calc.paid ?? 0) / owed) * 100)) : 0
+            const over = calc.balance < 0
+            const tiles = [
+              calc.model === 'dnevnica' ? ['Dana', String(calc.days ?? 0)] : null,
+              ['Zarađeno', formatMoney(earned, false)],
+              calc.bonus > 0 ? ['Bonus', formatMoney(calc.bonus, false)] : null,
+              ['Isplaćeno', formatMoney(calc.paid, false)],
+            ].filter(Boolean)
 
-            {calc.returned > 0 && (
-              <p className="mt-2 text-xs text-amber-700">
-                {countReturned(calc.returned)} ne ulazi u obračun dok je ne pošalješ ponovo.
-              </p>
-            )}
-          </div>
-        )}
+            return (
+              <div className="mt-4">
+                {/* Ako je primio više nego što je zaradio, piše se rečju — minus
+                    uz „imaš da primiš“ se čita kao greška. */}
+                <div className="rounded-2xl bg-ink px-4 py-4 text-white">
+                  <p className="eyebrow text-stone-400">{over ? 'Primio si više' : 'Imaš da primiš'}</p>
+                  <p
+                    className={cx(
+                      'mt-0.5 text-4xl font-extrabold tabular-nums tracking-tight',
+                      over ? 'text-rose-400' : 'text-white',
+                    )}
+                  >
+                    {formatMoney(Math.abs(calc.balance), false)}
+                  </p>
+                  <div
+                    className="mt-3 h-2 overflow-hidden rounded-full bg-white/15"
+                    role="progressbar"
+                    aria-label="Koliko ti je već isplaćeno"
+                    aria-valuenow={Math.round(share)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <div
+                      className={cx('h-full rounded-full transition-all', over ? 'bg-rose-400' : 'bg-brand-500')}
+                      style={{ width: `${share}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[12px] tabular-nums text-stone-400">
+                    isplaćeno {formatMoney(calc.paid, false)} od {formatMoney(owed, false)}
+                  </p>
+                </div>
+
+                <div className="mt-2.5 grid gap-2" style={{ gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))` }}>
+                  {tiles.map(([label, value]) => (
+                    <div key={label} className="rounded-2xl bg-stone-100 px-2 py-2.5 text-center">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500">{label}</p>
+                      <p className="mt-0.5 text-[15px] font-extrabold tabular-nums text-stone-900">{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {terms && <p className="mt-2.5 text-center text-[12px] tabular-nums text-stone-400">{terms}</p>}
+
+                {calc.returned > 0 && (
+                  <p className="mt-2 text-center text-xs text-amber-700">
+                    {countReturned(calc.returned)} ne ulazi u obračun dok je ne pošalješ ponovo.
+                  </p>
+                )}
+              </div>
+            )
+          })()        )}
       </Card>
 
       {/* ---------- Moji izveštaji i isplate: zatvoreno dok se ne klikne ---------- */}
