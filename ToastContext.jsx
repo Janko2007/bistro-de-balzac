@@ -39,7 +39,7 @@ export function ToastProvider({ children }) {
       {/* Na telefonu obaveštenje stoji IZNAD donje trake, a ne preko nje.
           Visinu donjih traka javlja ekran kroz `--toast-offset` (vidi
           useToastOffset); podrazumevano je to samo donja navigacija (56px). */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--toast-offset,56px)+env(safe-area-inset-bottom,0px))] z-[100] flex flex-col items-center gap-2 p-4 sm:bottom-auto sm:top-0 sm:items-end sm:safe-top">
+      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--toast-offset,var(--nav-h,56px))+env(safe-area-inset-bottom,0px))] z-[100] flex flex-col items-center gap-2 p-4 sm:bottom-auto sm:top-0 sm:items-end sm:safe-top">
         {toasts.map((t) => (
           <button
             key={t.id}
