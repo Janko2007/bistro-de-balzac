@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { usePersistentState } from '../lib/persist'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast, useToastOffset } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
 import { buildStoragePath, compressImage } from '../lib/image'
+import { loadLayout, normalizeLayout, packExtras, titleOf, unpackExtras } from '../lib/shiftForm'
 import {
   carriedCategoryNames,
   categoryComparator,
@@ -14,8 +16,8 @@ import {
   nextCountOn,
 } from '../lib/categories'
 import { dailyTaskFor } from '../lib/rules'
+import { isViewOnly } from '../lib/positions'
 import Avatar from '../components/Avatar'
-import MidShiftView from '../components/MidShiftView'
 import RuleText from '../components/RuleText'
 import {
   Badge,
@@ -100,6 +102,8 @@ function toDb(value) {
 /** Prodato — kod „krajnje“ se računa, inače ga radnik upisuje. */
 function soldOf(row, mode) {
   if (mode !== 'krajnje') return parseNumber(row.p)
+  // Dok krajnje nije upisano, prodato se ne računa (inače bi ispalo sve početno).
+  if ((row.e ?? '') === '') return 0
   return round2(parseNumber(row.s) + parseNumber(row.d) - parseNumber(row.e))
 }
 
@@ -171,6 +175,7 @@ const isDone = (row) =>
  */
 
 export default function NewReport() {
+
   const { profile, isAdmin } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
@@ -197,6 +202,9 @@ export default function NewReport() {
   const [myOpen, setMyOpen] = useState([]) // sve smene u kojima je radnik trenutno
   const [reportId, setReportId] = useState(null)
   const [status, setStatus] = useState(null)
+  // Poruka admina i artikli čije se stanje ne poklapa — radnik ih vidi dok je popis vraćen.
+  const [returnInfo, setReturnInfo] = useState({ note: '', mismatches: [] })
+  const [returnOpen, setReturnOpen] = useState(false)
   const [staff, setStaff] = useState([])
   // Za koji je izveštaj učitano ko radi u njemu — dok to ne stigne, ne zna se
   // da li je admin u smeni ili je samo uređuje.
@@ -212,6 +220,9 @@ export default function NewReport() {
   const [note, setNote] = useState('')
   const [taskDone, setTaskDone] = useState(false) // dnevna obaveza urađena u ovoj smeni
   const [images, setImages] = useState([])
+  // Izgled smene (redosled, nazivi, dodatna polja) — podešava admin.
+  const [layout, setLayout] = useState(() => normalizeLayout(null))
+  const [extras, setExtras] = useState({}) // vrednosti dodatnih polja: { idPolja: vrednost }
 
   /* Šta već postoji za izabrani datum i smenu — od toga zavisi da li se
      smena OTVARA ili se u nju ULAZI. */
@@ -221,10 +232,10 @@ export default function NewReport() {
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  const [search, setSearch] = useState('')
-  const [openCats, setOpenCats] = useState(() => new Set())
+  const [search, setSearch] = usePersistentState('newreport.search', '')
+  const [openCats, setOpenCats] = usePersistentState('newreport.openCats', () => new Set())
   // Pazar se otvara klikom, kao kategorije — zbir se vidi i kad je zatvoren.
-  const [pazarOpen, setPazarOpen] = useState(false)
+  const [pazarOpen, setPazarOpen] = usePersistentState('newreport.pazarOpen', false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
   const [leaveOpen, setLeaveOpen] = useState(false)
@@ -266,8 +277,10 @@ export default function NewReport() {
   const editable = status === 'otvoren' || status === 'vracen' || (isAdmin && submitted)
   const closed = submitted && !isAdmin
 
-  // Dok stoji traka „Zatvori smenu“ (iznad donje navigacije), obaveštenja idu iznad nje.
-  useToastOffset(134, !!reportId && editable)
+  /* Radnik na obuci kome je dozvoljeno samo gledanje: ulazi u smenu, vidi popis,
+     ali ništa ne unosi (i server mu ne dozvoljava upis). */
+  const viewOnly = isViewOnly(profile)
+
 
   /* ------------------------------------------------------------ */
   /*  Učitavanje artikala, kategorija i imena                      */
@@ -323,7 +336,9 @@ export default function NewReport() {
       .from('shift_reports')
       .select('id, report_date, shift, shift_report_staff!inner(profile_id)')
       .eq('shift_report_staff.profile_id', profile.id)
-      .in('status', ['otvoren', 'vracen'])
+      // Vraćen popis se ne otvara sam — radnik ga otvara iz Mojih izveštaja
+      // („Ispravi popis“), pa se ovde računaju samo smene koje traju.
+      .eq('status', 'otvoren')
       .order('report_date', { ascending: false })
       .limit(10)
 
@@ -480,6 +495,15 @@ export default function NewReport() {
       setCard(money.card)
       setNote(rep.note ?? '')
       setTaskDone(!!rep.daily_task_done)
+      // Dodatna polja se učitavaju posebno — bez skripte -22 ne smeju da ruše smenu.
+      supabase
+        .from('shift_reports')
+        .select('extras')
+        .eq('id', id)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (!error && data) setExtras(unpackExtras(data.extras))
+        })
 
       const next = {}
       for (const row of itemsRes.data ?? []) {
@@ -499,6 +523,33 @@ export default function NewReport() {
   useEffect(() => {
     if (reportId) loadReport(reportId)
   }, [reportId, loadReport])
+
+  // Šta je admin vratio na ispravku: poruka i artikli koji se ne poklapaju.
+  // Posebni upiti — ako baza nema te kolone, popis se i dalje normalno učitava.
+  useEffect(() => {
+    if (!reportId || status !== 'vracen') {
+      setReturnInfo({ note: '', mismatches: [] })
+      return undefined
+    }
+    let active = true
+    Promise.all([
+      supabase.from('shift_reports').select('admin_note').eq('id', reportId).maybeSingle(),
+      supabase
+        .from('shift_report_items')
+        .select('item_name, qty_end, check_status, check_qty')
+        .eq('report_id', reportId)
+        .eq('check_status', 'fali'),
+    ]).then(([noteRes, checkRes]) => {
+      if (!active) return
+      setReturnInfo({
+        note: noteRes.error ? '' : (noteRes.data?.admin_note ?? ''),
+        mismatches: checkRes.error ? [] : (checkRes.data ?? []),
+      })
+    })
+    return () => {
+      active = false
+    }
+  }, [reportId, status])
 
   /* ------------------------------------------------------------ */
   /*  Uživo — šta kolega upiše, vidi se odmah                      */
@@ -554,6 +605,7 @@ export default function NewReport() {
           if (!dirtyFields.current.has('note')) setNote(rep.note ?? '')
           // Kad kolega štiklira dnevnu obavezu, vidi se i ovde.
           if (!dirtyFields.current.has('task')) setTaskDone(!!rep.daily_task_done)
+          if (!dirtyFields.current.has('extras') && rep.extras) setExtras(unpackExtras(rep.extras))
         },
       )
       .on(
@@ -624,7 +676,8 @@ export default function NewReport() {
             // ostavlja prazan. Šta se upisuje a šta računa zavisi od načina
             // popisa (zalihe, brojač ili krajnje stanje).
             qty_sold: soldOf(row, mode),
-            qty_end: endOf(row, mode),
+            // Krajnje koje nije upisano ostaje prazno (NULL), ne nula.
+            qty_end: mode === 'krajnje' && (row.e ?? '') === '' ? null : endOf(row, mode),
             is_counter: mode === 'brojac',
             count_mode: mode,
           },
@@ -663,6 +716,9 @@ export default function NewReport() {
     }
     if (dirtyFields.current.has('note')) payload.note = noteRef.current.trim()
     if (dirtyFields.current.has('task')) payload.daily_task_done = taskRef.current
+    if (dirtyFields.current.has('extras')) {
+      payload.extras = packExtras(layoutRef.current, extrasRef.current)
+    }
 
     dirtyFields.current.clear()
     if (moneyWaits) dirtyFields.current.add('money')
@@ -683,6 +739,8 @@ export default function NewReport() {
   const cardRef = useRef('')
   const noteRef = useRef('')
   const taskRef = useRef(false)
+  const extrasRef = useRef({})
+  const layoutRef = useRef(normalizeLayout(null))
   useEffect(() => {
     taskRef.current = taskDone
   }, [taskDone])
@@ -695,6 +753,15 @@ export default function NewReport() {
   useEffect(() => {
     noteRef.current = note
   }, [note])
+  useEffect(() => {
+    extrasRef.current = extras
+  }, [extras])
+  useEffect(() => {
+    layoutRef.current = layout
+  }, [layout])
+  useEffect(() => {
+    loadLayout().then(setLayout)
+  }, [])
 
   function setCell(itemId, key, value) {
     setRows((prev) => ({
@@ -782,17 +849,17 @@ export default function NewReport() {
             .eq('profile_id', profile.id)
           if (error) throw error
         }
-        toast.info('Međusmena je isključena.')
+        setMidNames((prev) => prev.filter((nm) => nm !== profile.full_name))
       } else {
         const { error } = await supabase.rpc('open_or_join_shift', {
           p_date: reportDate,
           p_shift: 'medjusmena',
         })
         if (error) throw error
-        toast.success('Međusmena je uključena.')
+        // „Među“ se odmah pojavi pored imena, bez čekanja na osvežavanje.
+        setMidNames((prev) => (prev.includes(profile.full_name) ? prev : [...prev, profile.full_name]))
       }
       await loadMyOpen()
-      await loadStaff(reportId)
     } catch (err) {
       console.error(err)
       toast.error(errorMessage(err, 'Međusmena nije promenjena.'))
@@ -839,6 +906,7 @@ export default function NewReport() {
     setCard('')
     setNote('')
     setTaskDone(false)
+    setExtras({})
     setReportId(id)
   }
 
@@ -860,6 +928,7 @@ export default function NewReport() {
 
   async function joinShift() {
     if (!reportDate) return toast.error('Izaberi datum smene.')
+    if (viewOnly && !joinsExisting) return toast.error('Smena još nije otvorena.')
 
     setJoining(true)
     const { data, error } = await supabase.rpc('open_or_join_shift', {
@@ -897,6 +966,7 @@ export default function NewReport() {
     setCard('')
     setNote('')
     setTaskDone(false)
+    setExtras({})
     await loadMyOpen()
     toast.info('Izašao si iz smene — dnevnica se više ne računa.')
   }
@@ -1020,6 +1090,16 @@ export default function NewReport() {
   }, [reportId, status, adminEdit, staffFor, carriedCats, items, lastEnds, endsFor, rows])
 
   const doneCount = useMemo(() => items.filter((i) => isDone(rows[i.id])).length, [items, rows])
+  // Radnik je stvarno počeo popis kad je upisao prodato, dodato ili krajnje — samo
+  // početno stanje se prepisuje samo, pa ne računa.
+  const enteredCount = useMemo(
+    () =>
+      items.filter((i) => {
+        const r = rows[i.id]
+        return r && ((r.p ?? '') !== '' || (r.d ?? '') !== '' || (r.e ?? '') !== '')
+      }).length,
+    [items, rows],
+  )
 
   /* Popisani artikli po grupama — za potvrdu stanja pri zatvaranju smene. */
   const confirmList = useMemo(() => {
@@ -1047,6 +1127,13 @@ export default function NewReport() {
   const pazarNum = parseNumber(pazar)
   const cardNum = parseNumber(card)
   const cashNum = Math.round((pazarNum - cardNum) * 100) / 100
+
+  // Traka „Zatvori smenu“ se pojavljuje tek kad je upisan pazar i počet popis
+  // (admin koji uređuje tuđ popis je vidi uvek — njemu služi „Gotovo“).
+  const showCloseBar = !!reportId && editable && !viewOnly && (adminEdit || (pazar !== '' && enteredCount > 0))
+  // Dok stoji traka (iznad donje navigacije), obaveštenja idu iznad nje.
+  useToastOffset(134, showCloseBar)
+
   const cardTooBig = cardNum > pazarNum
 
   /** Šta je dnevna obaveza za dan u kome je smena (iz „Dnevnih obaveza“). */
@@ -1129,6 +1216,13 @@ export default function NewReport() {
       return `Kod ${countLabel(errorCount, 'artikla')} je prodato veće od novog stanja. Ispravi pa zatvori smenu.`
     }
     if (pazar === '') return 'Unesi pazar.'
+    if (!layout.hidden.includes('dodatno')) {
+      for (const f of layout.fields) {
+        if (f.required && f.type !== 'da_ne' && String(extras[f.id] ?? '').trim() === '') {
+          return `Upiši: ${f.label}.`
+        }
+      }
+    }
     if (cardTooBig) return 'Kartice ne mogu biti veće od pazara.'
     if (images.length === 0) {
       return `Slikaj izveštaj prodaje po operateru i ${terminalReportOf(shift)} — oboje na jednoj slici.`
@@ -1198,25 +1292,15 @@ export default function NewReport() {
   /* ============================================================== */
   const shiftCard = (
     <Card>
-      <CardHeader
-        title="Smena"
-        subtitle={joinsExisting && !reportId ? 'U toku' : undefined}
-        action={
-          reportId && editable ? (
-            <span
-              className={cx(
-                'shrink-0 text-[11px] font-semibold',
-                saveState === 'error' ? 'text-rose-600' : 'text-stone-400',
-              )}
-            >
-              {saveState === 'saving' && 'Čuva se…'}
-              {saveState === 'saved' && 'Sačuvano'}
-              {saveState === 'error' && 'Nije sačuvano'}
-            </span>
-          ) : null
-        }
-      />
-      <div className="space-y-4 p-4">
+      {/* Čuvanje ide samo od sebe i tiho; javlja se samo ako nije uspelo. */}
+      {reportId && editable && saveState === 'error' && (
+        <div className="flex justify-end px-4 pt-2.5">
+          <span className="shrink-0 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-200">
+            Nije sačuvano
+          </span>
+        </div>
+      )}
+      <div className={cx('space-y-4 p-4', reportId && editable && saveState === 'error' && '!pt-2')}>
         <Field label="Datum">
           <Input
             type="date"
@@ -1265,7 +1349,6 @@ export default function NewReport() {
               )
             })}
           </div>
-          {myShiftsToday.size > 1 && <p className="hint">Jedna dnevnica za ceo dan.</p>}
         </div>
 
         {reportId ? (
@@ -1310,7 +1393,7 @@ export default function NewReport() {
 
             {/* Međusmena: radiš i prvu i drugu, a dnevnica je jedna. Uključuje se
                 odavde, iz bilo koje od te dve smene. Radi je samo jedan radnik. */}
-            {editable && !adminEdit && (
+            {editable && !adminEdit && status !== 'vracen' && (
               <div className="mt-3">
                 <button
                   type="button"
@@ -1319,6 +1402,7 @@ export default function NewReport() {
                   aria-pressed={isMidMe}
                   className={cx(
                     'flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition',
+                    viewOnly && 'hidden',
                     isMidMe
                       ? 'bg-brand-50 ring-1 ring-inset ring-brand-600/30'
                       : 'bg-stone-100 hover:bg-stone-200/70 disabled:opacity-50',
@@ -1346,9 +1430,21 @@ export default function NewReport() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="mt-1 px-0 text-rose-600"
+                  className="mt-2 w-full justify-center gap-2 rounded-2xl border border-rose-300 bg-white text-rose-600 hover:bg-rose-50"
                   onClick={() => setLeaveOpen(true)}
                 >
+                  <svg
+                    className="h-4 w-4 shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.25"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+                  </svg>
                   Izađi iz smene
                 </Button>
               </div>
@@ -1370,11 +1466,15 @@ export default function NewReport() {
               size="lg"
               className="w-full"
               loading={joining}
-              disabled={peek === null || shiftTaken || midTaken}
+              disabled={peek === null || shiftTaken || midTaken || (viewOnly && !joinsExisting)}
               onClick={joinShift}
             >
               {peek === null ? 'Proveravam…' : joinsExisting ? 'Uđi u smenu' : 'Otvori smenu'}
             </Button>
+
+            {viewOnly && peek && !joinsExisting && !shiftTaken && (
+              <p className="hint">Smena još nije otvorena — uđi čim je neko otvori.</p>
+            )}
 
             {(shiftTaken || midTaken) && (
               <p className="hint text-rose-600">
@@ -1386,6 +1486,24 @@ export default function NewReport() {
       </div>
     </Card>
   )
+
+  /* Obuka, samo gleda: uz izbor smene dobija popis samo za čitanje. */
+  if (reportId && viewOnly && !closed) {
+    return (
+      <div className="space-y-4">
+        {shiftCard}
+        <Card>
+          <div className="space-y-3 p-6 text-center">
+            <p className="text-base font-bold text-stone-900">Obuka — gledaš smenu</p>
+            <p className="text-[13px] text-stone-400">Popis možeš da pregledaš, ali ne i da menjaš.</p>
+            <Button type="button" onClick={() => navigate(`/izvestaj/${reportId}`)}>
+              Otvori popis
+            </Button>
+          </div>
+        </Card>
+      </div>
+    )
+  }
 
   /* Smena je zatvorena — ništa se više ne unosi. */
   if (reportId && closed) {
@@ -1411,19 +1529,107 @@ export default function NewReport() {
     return <div className="space-y-4">{shiftCard}</div>
   }
 
+  // Redosled delova smene: CSS order, pa se ništa u kodu ne seli.
+  const ord = (key) => layout.order.indexOf(key) + 1
+  const sectionHidden = (key) => (layout.hidden.includes(key) ? 'hidden' : undefined)
+  const sectionTitle = (key) => titleOf(layout, key)
+  const setExtra = (id, value) => {
+    setExtras((prev) => ({ ...prev, [id]: value }))
+    markField('extras')
+  }
+
   return (
-    <form onSubmit={openConfirm} className="space-y-4 pb-28">
+    <form onSubmit={openConfirm} className="flex flex-col gap-4 pb-28">
       {/* Admin uređuje tuđ popis: ne ulazi u smenu, ne dobija dnevnicu. */}
       {adminEdit && (
-        <div className="rounded-2xl bg-ink px-4 py-3 text-white">
+        <div className="rounded-2xl bg-ink px-4 py-3 text-white" style={{ order: -2 }}>
           <p className="text-sm font-bold">Uređuješ kao admin</p>
           <p className="mt-0.5 text-xs text-stone-300">Ne računa ti se dnevnica. Izmene se čuvaju odmah.</p>
         </div>
       )}
 
-      {shiftCard}
+      {/* Popis je vraćen na ispravku: zatvoreno dok radnik ne klikne, pa vidi
+          šta se ne poklapa i poruku koju je admin ostavio. */}
+      {status === 'vracen' && !adminEdit && (
+        <div
+          className="overflow-hidden rounded-2xl bg-rose-50 ring-1 ring-inset ring-rose-200"
+          style={{ order: -3 }}
+        >
+          <button
+            type="button"
+            onClick={() => setReturnOpen((v) => !v)}
+            aria-expanded={returnOpen}
+            className="flex w-full items-center gap-2.5 px-4 py-3.5 text-left"
+          >
+            <svg
+              className={cx('h-4 w-4 shrink-0 text-rose-400 transition-transform', returnOpen && 'rotate-90')}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-bold tracking-tight text-rose-900">
+                Popis je vraćen na ispravku
+              </span>
+              <span className="mt-0.5 block text-[13px] text-rose-700">
+                Dodirni da vidiš šta treba da ispraviš
+              </span>
+            </span>
+            {returnInfo.mismatches.length > 0 && (
+              <span className="shrink-0 rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-rose-700">
+                {returnInfo.mismatches.length}
+              </span>
+            )}
+          </button>
+
+          {returnOpen && (
+            <div className="space-y-3 border-t border-rose-200 px-4 py-3">
+              {returnInfo.note && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-rose-700">Poruka od admina</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-rose-900">{returnInfo.note}</p>
+                </div>
+              )}
+              {returnInfo.mismatches.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-rose-700">Manjak</p>
+                  <ul className="mt-1.5 space-y-0.5 text-sm text-rose-900">
+                    {returnInfo.mismatches.map((m) => {
+                      const hasExact = m.check_qty !== null && m.check_qty !== undefined
+                      const diff = hasExact
+                        ? Math.round((Number(m.qty_end) - Number(m.check_qty)) * 100) / 100
+                        : 0
+                      return (
+                        <li key={m.item_name}>
+                          <b>{m.item_name}</b> · upisano {formatQty(m.qty_end)}
+                          {hasExact ? `, tačno ${formatQty(m.check_qty)}` : ''}
+                          {diff > 0 && <b className="text-rose-700"> · manjak {formatQty(diff)}</b>}
+                          {diff < 0 && <b className="text-rose-700"> · višak {formatQty(-diff)}</b>}
+                        </li>
+                      )
+                    })}
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {!returnInfo.note && returnInfo.mismatches.length === 0 && (
+                <p className="text-sm text-rose-800">Admin nije ostavio poruku. Proveri popis i pošalji ga ponovo.</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ order: -1 }}>{shiftCard}</div>
 
       {/* ---------- Pazar — otvara se klikom ---------- */}
+      <div style={{ order: ord('pazar') }}>
       <Card>
         <button
           type="button"
@@ -1449,7 +1655,7 @@ export default function NewReport() {
 
           <span className="min-w-0 flex-1">
             <span className="block text-[15px] font-semibold tracking-tight text-stone-900">
-              Pazar
+              {sectionTitle('pazar')}
             </span>
             {/* Zbir se vidi i kad je zatvoren — ne mora da se otvara samo da se pogleda. */}
             <span className="mt-0.5 block truncate text-[13px] text-stone-500">
@@ -1510,11 +1716,13 @@ export default function NewReport() {
         </div>
         )}
       </Card>
+      </div>
 
       {/* ---------- Popis ---------- */}
+      <div style={{ order: ord('popis') }}>
       <Card>
         <CardHeader
-          title="Popis artikala"
+          title={sectionTitle('popis')}
           subtitle={`${doneCount}/${items.length}${
             errorCount > 0 ? ` · ${errorCount} sa greškom` : ''
           }`}
@@ -1677,7 +1885,7 @@ export default function NewReport() {
                                   key={c.key}
                                   className={cx(
                                     'w-[78px] text-center text-base font-bold tabular-nums',
-                                    racunato && done
+                                    racunato && done && row.e !== ''
                                       ? bad
                                         ? 'text-rose-600'
                                         : 'text-stone-500'
@@ -1685,7 +1893,7 @@ export default function NewReport() {
                                   )}
                                   title={racunato ? 'Prodato = (početno + dodato) − krajnje' : undefined}
                                 >
-                                  {racunato && done ? formatQty(sold) : '—'}
+                                  {racunato && done && row.e !== '' ? formatQty(sold) : '—'}
                                 </span>
                               )
                             }
@@ -1776,16 +1984,13 @@ export default function NewReport() {
           )}
         </div>
       </Card>
-
-      {/* ---------- Međusmena: šta rade prva i druga smena ---------- */}
-      {isMidMe && reportId && (
-        <MidShiftView date={reportDate} myName={profile?.full_name} />
-      )}
+      </div>
 
       {/* ---------- Slika izveštaja (kasa + aparat za kartice) ---------- */}
+      <div style={{ order: ord('slika') }}>
       <Card className={cx(images.length === 0 && 'ring-1 ring-rose-300')}>
         <CardHeader
-          title="Slika izveštaja"
+          title={sectionTitle('slika')}
           action={
             images.length === 0 ? (
               <Badge className="shrink-0 bg-rose-100 text-rose-700 ring-rose-600/20">
@@ -1875,11 +2080,13 @@ export default function NewReport() {
           )}
         </div>
       </Card>
+      </div>
 
       {/* ---------- Dnevna obaveza za dan smene ---------- */}
+      <div style={{ order: ord('obaveza') }} className={sectionHidden('obaveza')}>
       <Card>
         <CardHeader
-          title={`Dnevna obaveza — ${dailyTask.day}`}
+          title={dailyTask.day}
           action={
             taskDone ? (
               <Badge className="shrink-0 bg-emerald-100 text-emerald-800 ring-emerald-600/20">
@@ -1932,10 +2139,12 @@ export default function NewReport() {
           </button>
         </div>
       </Card>
+      </div>
 
       {/* ---------- Napomena ---------- */}
+      <div style={{ order: ord('napomena') }} className={sectionHidden('napomena')}>
       <Card>
-        <CardHeader title="Napomena" subtitle="Opciono" />
+        <CardHeader title={sectionTitle('napomena')} subtitle="Opciono" />
         <div className="p-4">
           <Textarea
             rows={3}
@@ -1948,13 +2157,65 @@ export default function NewReport() {
           />
         </div>
       </Card>
+      </div>
+
+      {/* ---------- Dodatna polja (admin ih dodaje u Artikli → Izgled smene) ---------- */}
+      {layout.fields.length > 0 && (
+        <div style={{ order: ord('dodatno') }} className={sectionHidden('dodatno')}>
+          <Card>
+            <CardHeader title={sectionTitle('dodatno')} />
+            <div className="space-y-3 p-4">
+              {layout.fields.map((f) =>
+                f.type === 'da_ne' ? (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setExtra(f.id, extras[f.id] === true ? '' : true)}
+                    aria-pressed={extras[f.id] === true}
+                    className={cx(
+                      'flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left transition',
+                      extras[f.id] === true ? 'bg-emerald-50' : 'bg-stone-100 hover:bg-stone-200/70',
+                    )}
+                  >
+                    <span
+                      className={cx(
+                        'flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-xs font-bold transition',
+                        extras[f.id] === true
+                          ? 'border-emerald-600 bg-emerald-600 text-white'
+                          : 'border-stone-300 bg-white text-transparent',
+                      )}
+                      aria-hidden="true"
+                    >
+                      ✓
+                    </span>
+                    <span className="text-sm font-semibold text-stone-800">{f.label}</span>
+                  </button>
+                ) : (
+                  <Field key={f.id} label={f.label} required={f.required}>
+                    {f.type === 'novac' ? (
+                      <MoneyInput value={extras[f.id] ?? ''} onChange={(v) => setExtra(f.id, v)} />
+                    ) : (
+                      <Input
+                        inputMode={f.type === 'broj' ? 'decimal' : undefined}
+                        value={extras[f.id] ?? ''}
+                        onChange={(e) => setExtra(f.id, e.target.value)}
+                      />
+                    )}
+                  </Field>
+                ),
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* ---------- Fiksna traka sa dugmetom ----------
           Stoji tačno iznad donje navigacije (56 px + linija). Na iPhone-u je
           navigacija viša za prostor iznad crte za gašenje aplikacije — zato
           se dodaje i `safe-area-inset-bottom`, inače bi traka upala pod nju.
           Na računaru nema donje navigacije, pa je traka na samom dnu. */}
-      <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
+      {showCloseBar && (
+      <div className="fixed inset-x-0 bottom-[calc(var(--nav-h,57px)+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="eyebrow">Predato</p>
@@ -1982,6 +2243,7 @@ export default function NewReport() {
           )}
         </div>
       </div>
+      )}
 
       {/* ---------- Potvrda brisanja unetog popisa ---------- */}
       <Modal
@@ -2032,9 +2294,38 @@ export default function NewReport() {
           </div>
         }
       >
-        <p className="text-sm text-stone-600">
-          Dnevnica za ovu smenu ti se neće računati. Popis ostaje.
-        </p>
+        <div className="flex flex-col items-center text-center">
+          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 text-rose-600 ring-1 ring-inset ring-rose-200">
+            <svg
+              className="h-6 w-6"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+            </svg>
+          </span>
+          <p className="mt-3 text-[15px] font-bold text-stone-900">Sigurno izlaziš iz ove smene?</p>
+        </div>
+
+        <ul className="mt-4 space-y-2">
+          <li className="flex items-start gap-3 rounded-xl bg-rose-50 px-3.5 py-2.5 text-[13px] leading-snug text-rose-900">
+            <span className="mt-px font-extrabold" aria-hidden="true">
+              ✕
+            </span>
+            Dnevnica za ovu smenu ti se neće računati.
+          </li>
+          <li className="flex items-start gap-3 rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[13px] leading-snug text-emerald-900">
+            <span className="mt-px font-extrabold" aria-hidden="true">
+              ✓
+            </span>
+            Popis ostaje, kolege ga nastavljaju.
+          </li>
+        </ul>
       </Modal>
 
       {/* ---------- Potvrda zatvaranja smene ---------- */}
