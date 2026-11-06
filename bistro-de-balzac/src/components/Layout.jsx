@@ -127,7 +127,10 @@ export default function Layout() {
   // obaveštenja) dižu se za toliko preko ove promenljive.
   useEffect(() => {
     const root = document.documentElement
-    root.style.setProperty('--nav-h', isAndroid ? '66px' : isIos ? '80px' : '57px')
+    // Na iPhone-u se visina računa tako da, zajedno sa env(safe-area-inset-bottom) kod ostalih
+    // elemenata, dugmad ostanu tačno iznad lebdeće trake.
+    const iosHeight = 'calc(70px + max(10px, env(safe-area-inset-bottom, 0px) * 0.5) - env(safe-area-inset-bottom, 0px))'
+    root.style.setProperty('--nav-h', isAndroid ? '66px' : isIos ? iosHeight : '57px')
     return () => root.style.removeProperty('--nav-h')
   }, [isIos, isAndroid])
 
@@ -189,7 +192,7 @@ export default function Layout() {
         isAndroid
           ? 'pb-[calc(86px+env(safe-area-inset-bottom,0px))]'
           : isIos
-            ? 'pb-[calc(100px+env(safe-area-inset-bottom,0px))]'
+            ? 'pb-[calc(var(--nav-h,70px)+env(safe-area-inset-bottom,0px)+18px)]'
             : 'pb-[calc(76px+env(safe-area-inset-bottom,0px))]',
       )}
     >
