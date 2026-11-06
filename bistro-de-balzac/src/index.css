@@ -155,7 +155,8 @@
   right: 0;
   bottom: 0;
   z-index: 30;
-  padding: 0 9px calc(14px + env(safe-area-inset-bottom, 0px));
+  /* Traka stoji tik iznad crte za gašenje aplikacije, ne visoko iznad nje. */
+  padding: 0 9px max(10px, calc(env(safe-area-inset-bottom, 0px) * 0.5));
   pointer-events: none;
 }
 /* Ispod trake sve što se skroluje bledi i zamagljuje, da se slova ne vide kroz prazan prostor. */
