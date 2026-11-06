@@ -2215,7 +2215,7 @@ export default function NewReport() {
           se dodaje i `safe-area-inset-bottom`, inače bi traka upala pod nju.
           Na računaru nema donje navigacije, pa je traka na samom dnu. */}
       {showCloseBar && (
-      <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
+      <div className="fixed inset-x-0 bottom-[calc(var(--nav-h,57px)+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="eyebrow">Predato</p>
@@ -2294,9 +2294,38 @@ export default function NewReport() {
           </div>
         }
       >
-        <p className="text-sm text-stone-600">
-          Dnevnica za ovu smenu ti se neće računati. Popis ostaje.
-        </p>
+        <div className="flex flex-col items-center text-center">
+          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 text-rose-600 ring-1 ring-inset ring-rose-200">
+            <svg
+              className="h-6 w-6"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+            </svg>
+          </span>
+          <p className="mt-3 text-[15px] font-bold text-stone-900">Sigurno izlaziš iz ove smene?</p>
+        </div>
+
+        <ul className="mt-4 space-y-2">
+          <li className="flex items-start gap-3 rounded-xl bg-rose-50 px-3.5 py-2.5 text-[13px] leading-snug text-rose-900">
+            <span className="mt-px font-extrabold" aria-hidden="true">
+              ✕
+            </span>
+            Dnevnica za ovu smenu ti se neće računati.
+          </li>
+          <li className="flex items-start gap-3 rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[13px] leading-snug text-emerald-900">
+            <span className="mt-px font-extrabold" aria-hidden="true">
+              ✓
+            </span>
+            Popis ostaje, kolege ga nastavljaju.
+          </li>
+        </ul>
       </Modal>
 
       {/* ---------- Potvrda zatvaranja smene ---------- */}

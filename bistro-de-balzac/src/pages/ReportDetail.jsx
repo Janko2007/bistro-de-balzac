@@ -1386,7 +1386,7 @@ export default function ReportDetail() {
           `safe-area-inset-bottom` traka bi upala pod nju. Na računaru nema
           navigacije, pa ide na dno, sa malo vazduha ispod dugmadi. */}
       {isAdmin && (
-        <div className="fixed inset-x-0 bottom-[calc(57px+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-2 backdrop-blur lg:bottom-0 lg:py-3 lg:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
+        <div className="fixed inset-x-0 bottom-[calc(var(--nav-h,57px)+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-2 backdrop-blur lg:bottom-0 lg:py-3 lg:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
           <div className="relative mx-auto flex max-w-6xl items-center gap-2">
             {report.status !== 'potvrdjen' ? (
               <Button

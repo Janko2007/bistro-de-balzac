@@ -147,3 +147,119 @@
     transform: rotate(360deg);
   }
 }
+
+/* ---------- Donja traka na iPhone-u: lebdeće staklo sa pločicom koja klizi ---------- */
+.ios-wrap {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  padding: 0 9px calc(14px + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+}
+/* Ispod trake sve što se skroluje bledi i zamagljuje, da se slova ne vide kroz prazan prostor. */
+.ios-wrap::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: -26px;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(245, 245, 244, 0.97) 0%, rgba(245, 245, 244, 0.86) 55%, rgba(245, 245, 244, 0) 100%);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  -webkit-mask-image: linear-gradient(to top, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to top, #000 62%, transparent 100%);
+}
+.ios-bar {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  padding: 5px;
+  border-radius: 34px;
+  background: rgba(255, 255, 255, 0.74);
+  -webkit-backdrop-filter: blur(26px) saturate(160%);
+  backdrop-filter: blur(26px) saturate(160%);
+  border: 1px solid rgba(28, 25, 23, 0.08);
+  box-shadow: 0 18px 44px rgba(28, 25, 23, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+.ios-grid {
+  position: relative;
+  display: grid;
+  align-items: center;
+}
+.ios-pill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+  transition: transform 0.52s cubic-bezier(0.25, 0.9, 0.25, 1), opacity 0.2s;
+  will-change: transform;
+}
+.ios-pill-fill {
+  position: absolute;
+  inset: 2px 5px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0)),
+    var(--ios-tint, rgba(239, 95, 7, 0.14));
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.95),
+    inset 0 -1.5px 1px rgba(28, 25, 23, 0.08),
+    inset 0 0 0 1px var(--ios-ring, rgba(239, 95, 7, 0.24)),
+    0 6px 18px var(--ios-glow, rgba(239, 95, 7, 0.2));
+}
+.ios-pill-shine {
+  position: absolute;
+  left: 17%;
+  right: 17%;
+  top: 3px;
+  height: 28%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0));
+  filter: blur(1.4px);
+  opacity: 0.75;
+}
+.ios-tab {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  height: 50px;
+  color: rgba(68, 64, 60, 0.55);
+  transition: color 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.5s cubic-bezier(0.2, 1.5, 0.3, 1), filter 0.34s;
+}
+.ios-tab:active {
+  transform: scale(0.9);
+}
+.ios-tab.is-active {
+  color: var(--ios-ink, #c64608);
+  filter: drop-shadow(0 0 8px var(--ios-glow, rgba(239, 95, 7, 0.4)));
+}
+@media (prefers-reduced-motion: reduce) {
+  .ios-pill,
+  .ios-tab {
+    transition: none;
+  }
+}
+
+/* Android: ista traka i pločica, samo pripojena uz dno ekrana (bez lebdenja i zamućenja iznad). */
+.ios-wrap.is-android {
+  padding: 0;
+}
+.ios-wrap.is-android::before {
+  display: none;
+}
+.ios-wrap.is-android .ios-bar {
+  border-radius: 22px 22px 0 0;
+  border-width: 1px 0 0 0;
+  background: #ffffff;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -6px 20px rgba(28, 25, 23, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}

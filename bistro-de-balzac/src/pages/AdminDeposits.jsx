@@ -762,7 +762,7 @@ export default function AdminDeposits({ embedded = false }) {
       {/* ---------- Traka sa označenim danima ---------- */}
       {/* Iznad donje navigacije, uz prostor za crtu za gašenje na iPhone-u. */}
       {selected.size > 0 && (
-        <div className="sticky bottom-[calc(68px+env(safe-area-inset-bottom,0px))] z-20 lg:bottom-4">
+        <div className="sticky bottom-[calc(var(--nav-h,57px)+11px+env(safe-area-inset-bottom,0px))] z-20 lg:bottom-4">
           <div className="flex items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-white">
             <div className="min-w-0 flex-1">
               <p className="text-[11px] uppercase tracking-wide text-stone-400">

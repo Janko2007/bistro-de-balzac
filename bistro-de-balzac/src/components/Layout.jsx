@@ -36,14 +36,14 @@ const icons = {
   bank: 'M4 6h16a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2zM12 9.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5M6 10v4M18 10v4',
 }
 
-function Icon({ path, className = 'h-5 w-5' }) {
+function Icon({ path, className = 'h-5 w-5', weight = 2 }) {
   return (
     <svg
       className={className}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth={weight}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -98,23 +98,11 @@ function useScrollMemory() {
 
 /**
  * Donja traka prema telefonu:
- *   iPhone  — providna, mutna traka bez senke; izabrana sekcija u maloj blagoj pločici
- *   Android — puna bela traka sa blagom senkom; izabrana sekcija u većoj zaobljenoj pločici
+ *   iPhone  — lebdeće staklo sa pločicom koja klizi
+ *   Android — ista pločica i boje, ali traka je pripojena uz dno ekrana
  *   ostalo  — kako je bilo
  */
 const NAV_LOOK = {
-  ios: {
-    bar: 'border-t border-black/5 bg-white/70 backdrop-blur-2xl',
-    pill: 'h-9 w-14 rounded-xl',
-    pillOn: 'bg-brand-100/60',
-    icon: 'h-[25px] w-[25px]',
-  },
-  android: {
-    bar: 'border-t border-stone-200 bg-white shadow-[0_-3px_10px_-4px_rgba(28,25,23,0.22)]',
-    pill: 'h-8 w-16 rounded-full',
-    pillOn: 'bg-brand-100',
-    icon: 'h-6 w-6',
-  },
   other: {
     bar: 'border-t border-stone-200/80 bg-white/90 shadow-[0_-8px_24px_-12px_rgba(28,25,23,0.18)] backdrop-blur-xl',
     pill: 'h-11 w-[72px] rounded-2xl',
@@ -122,14 +110,26 @@ const NAV_LOOK = {
     icon: 'h-[26px] w-[26px]',
   },
 }
-
 export default function Layout() {
   const { profile, isAdmin, signOut } = useAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
 
   useScrollMemory()
-  const look = NAV_LOOK[useMemo(detectPlatform, [])]
+  const platform = useMemo(detectPlatform, [])
+  const isAndroid = platform === 'android'
+  // iPhone i Android dele istu traku sa pločicom koja klizi; ostali imaju staru.
+  const isIos = platform === 'ios' || isAndroid
+  const look = NAV_LOOK.other
+  const { pathname } = useLocation()
+
+  // Lebdeća traka na iPhone-u je viša; ostali ekrani (donje trake sa dugmadima,
+  // obaveštenja) dižu se za toliko preko ove promenljive.
+  useEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--nav-h', isAndroid ? '66px' : isIos ? '80px' : '57px')
+    return () => root.style.removeProperty('--nav-h')
+  }, [isIos, isAndroid])
 
   // Obračunski period podešava admin — učitava se pri prijavi, pa se ekran osveži.
   const [periodVersion, setPeriodVersion] = useState(0)
@@ -183,7 +183,16 @@ export default function Layout() {
   return (
     // Dole ima mesta za donju navigaciju — na iPhone-u i za prostor iznad
     // crte za gašenje aplikacije, da poslednja kartica ne ostane ispod nje.
-    <div className="min-h-screen bg-stone-100 pb-[calc(76px+env(safe-area-inset-bottom,0px))] lg:pb-0">
+    <div
+      className={cx(
+        'min-h-screen bg-stone-100 lg:pb-0',
+        isAndroid
+          ? 'pb-[calc(86px+env(safe-area-inset-bottom,0px))]'
+          : isIos
+            ? 'pb-[calc(100px+env(safe-area-inset-bottom,0px))]'
+            : 'pb-[calc(76px+env(safe-area-inset-bottom,0px))]',
+      )}
+    >
       {/* ---------- Gornja traka ---------- */}
       <header
         className="sticky top-0 z-30 border-b border-ink-800 bg-ink text-white safe-top"
@@ -295,11 +304,66 @@ export default function Layout() {
       {/* Obaveštenja koja iskaču jednom — čim se radnik prijavi ili vrati u aplikaciju. */}
       <AnnouncementGate />
 
-      {/* ---------- Donja navigacija (mobilni) ---------- */}
+      {/* ---------- Donja navigacija na iPhone-u: lebdeće staklo ---------- */}
+      {isIos && (
+        <nav className={cx('ios-wrap lg:hidden', isAndroid && 'is-android')} aria-label="Glavna navigacija">
+          {(() => {
+            const count = navItems.length
+            const active = navItems.findIndex((item) =>
+              item.end ? pathname === item.to : pathname === item.to || pathname.startsWith(`${item.to}/`),
+            )
+            // Boja izabrana u Profilu ima prednost nad podrazumevanom narandžastom.
+            const vars = theme
+              ? {
+                  '--ios-ink': theme.navActive,
+                  '--ios-tint': `${theme.navActive}24`,
+                  '--ios-ring': `${theme.navActive}40`,
+                  '--ios-glow': `${theme.navActive}55`,
+                }
+              : undefined
+            return (
+              <div className="ios-bar" style={vars}>
+                <div className="ios-grid" style={{ gridTemplateColumns: `repeat(${count}, 1fr)` }}>
+                  <span
+                    className="ios-pill"
+                    style={{
+                      width: `${100 / count}%`,
+                      transform: `translateX(${Math.max(active, 0) * 100}%)`,
+                      opacity: active < 0 ? 0 : 1,
+                    }}
+                    aria-hidden="true"
+                  >
+                    <span className="ios-pill-fill" />
+                    <span className="ios-pill-shine" />
+                  </span>
+                  {navItems.map((item, index) => (
+                    <NavLink
+                      key={item.to}
+                      aria-label={item.label}
+                      title={item.label}
+                      to={item.to}
+                      end={item.end}
+                      className={cx('ios-tab', index === active && 'is-active')}
+                    >
+                      <Icon
+                        path={item.icon}
+                        className="h-[25px] w-[25px]"
+                        weight={index === active ? 2.4 : 2}
+                      />
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+        </nav>
+      )}
+
+      {/* ---------- Donja navigacija (ostali telefoni i računar) ---------- */}
       {/* Fiksna visina i zabranjen prelom teksta — dugmad stoje na istom
           mestu bez obzira na to koja je sekcija otvorena. */}
       <nav
-        className={cx('fixed inset-x-0 bottom-0 z-30 safe-bottom lg:hidden', look.bar)}
+        className={cx('fixed inset-x-0 bottom-0 z-30 safe-bottom lg:hidden', look.bar, isIos && 'hidden')}
         style={theme ? { backgroundColor: theme.navBg, borderColor: theme.navBorder } : undefined}
       >
         <div className="mx-auto flex max-w-lg px-1.5">
