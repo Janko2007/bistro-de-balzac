@@ -123,6 +123,15 @@ export default function Layout() {
   const look = NAV_LOOK.other
   const { pathname } = useLocation()
 
+  // Strelica na vrh se pojavi tek kad se stranica pomeri nadole.
+  const [scrolled, setScrolled] = useState(false)
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 320)
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
   // Lebdeća traka na iPhone-u je viša; ostali ekrani (donje trake sa dugmadima,
   // obaveštenja) dižu se za toliko preko ove promenljive.
   useEffect(() => {
@@ -130,8 +139,23 @@ export default function Layout() {
     // Na iPhone-u se visina računa tako da, zajedno sa env(safe-area-inset-bottom) kod ostalih
     // elemenata, dugmad ostanu tačno iznad lebdeće trake.
     const iosHeight = 'calc(70px + max(10px, env(safe-area-inset-bottom, 0px) * 0.5) - env(safe-area-inset-bottom, 0px))'
-    root.style.setProperty('--nav-h', isAndroid ? '66px' : isIos ? iosHeight : '57px')
-    return () => root.style.removeProperty('--nav-h')
+    root.style.setProperty('--nav-h', isAndroid ? '63px' : isIos ? iosHeight : '57px')
+    // Donje trake sa dugmadima (izveštaj, popis) na iPhone-u se spuštaju do dna ekrana, pod
+    // lebdeću traku, da između dve trake nema providnog procepa kroz koji se vidi sadržaj.
+    const underFloating = isIos
+    root.style.setProperty(
+      '--bar-bottom',
+      underFloating ? '0px' : 'calc(var(--nav-h) + env(safe-area-inset-bottom, 0px))',
+    )
+    root.style.setProperty(
+      '--bar-pad',
+      underFloating ? 'calc(var(--nav-h) + env(safe-area-inset-bottom, 0px))' : '0px',
+    )
+    return () => {
+      root.style.removeProperty('--nav-h')
+      root.style.removeProperty('--bar-bottom')
+      root.style.removeProperty('--bar-pad')
+    }
   }, [isIos, isAndroid])
 
   // Obračunski period podešava admin — učitava se pri prijavi, pa se ekran osveži.
@@ -209,8 +233,48 @@ export default function Layout() {
           />
           {/* Naziv je na sredini; logo levo i slika profila desno su iste širine.
               Na računaru, gde stoji i navigacija, naziv ostaje uz logo. */}
-          <div className="min-w-0 flex-1 text-center lg:text-left">
-            <p className="truncate text-[15px] font-bold leading-tight">{APP_NAME}</p>
+          <div className="flex h-9 min-w-0 flex-1 items-center justify-center text-center lg:justify-start lg:text-left">
+            {/* Strelica izlazi tek kad se skroluje nadole; plutaju desno od naziva, pa naziv
+                ostaje tačno na sredini. Klik vraća na vrh stranice. */}
+            <p
+              className={cx(
+                'relative max-w-full text-[15px] font-bold leading-none',
+                'transition-transform duration-[420ms] ease-[cubic-bezier(0.25,0.9,0.25,1)] motion-reduce:transition-none',
+                // Naziv klizne ulevo za pola širine strelice, pa par naziv + strelica ostaje na sredini.
+                scrolled && '-translate-x-[19px] lg:translate-x-0',
+              )}
+            >
+              <span className="block truncate">{APP_NAME}</span>
+              <button
+                type="button"
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                aria-label="Nazad na vrh stranice"
+                title="Na vrh"
+                tabIndex={scrolled ? 0 : -1}
+                className={cx(
+                  'absolute left-full top-1/2 ml-2.5 flex h-7 w-7 -translate-y-1/2 items-center justify-center',
+                  'rounded-full bg-white/15 text-white hover:bg-white/25 motion-reduce:transition-none',
+                  'transition-[opacity,transform,background-color] duration-[380ms] ease-[cubic-bezier(0.25,0.9,0.25,1)]',
+                  // Izlazi iz naziva: najpre klizne ulevo, a tek zatim se pojavi i naraste (blago kašnjenje).
+                  scrolled
+                    ? 'translate-x-0 scale-100 opacity-100 delay-100 active:scale-90'
+                    : 'pointer-events-none -translate-x-3 scale-50 opacity-0',
+                )}
+              >
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+              </button>
+            </p>
           </div>
 
           {/* Desktop navigacija */}
