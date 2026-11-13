@@ -200,10 +200,11 @@ export async function renderScheduleCanvas({ week, slots, names, cyr = false, bl
       ctx.fillStyle = INK
       const title = t('Međusmena')
       fit(title, 800, 16, maxW)
-      ctx.fillText(title, lx, mid - 31)
+      // Naziv je tačno na sredini polja; radni dani idu iznad njega, a vikend ispod.
+      ctx.fillText(title, lx, mid)
       const rows = [
-        [t('radni dani'), 800, INK, mid - 11],
-        ['9:00–17:00', 700, MUTED, mid + 3],
+        [t('radni dani'), 800, INK, mid - 36],
+        ['9:00–17:00', 700, MUTED, mid - 22],
         [t('vikend'), 800, INK, mid + 22],
         ['12:00–20:00', 700, MUTED, mid + 36],
       ]
