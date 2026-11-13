@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { usePersistentState } from '../lib/persist'
+import { usePermanentState, usePersistentState } from '../lib/persist'
 
 import { useToast } from '../context/ToastContext'
 import { supabase } from '../lib/supabaseClient'
@@ -15,7 +15,9 @@ import {
   Spinner,
 } from '../components/ui'
 import DownloadIcon from '../components/DownloadIcon'
+import MidMark from '../components/MidMark'
 import ReportListItem from '../components/ReportListItem'
+import { dailyTaskFor } from '../lib/rules'
 import { displayNames } from '../lib/scheduleImage'
 import ReportPicker from '../components/ReportPicker'
 import ReportTrash from '../components/ReportTrash'
@@ -26,6 +28,7 @@ import {
   LOCALE,
   SHIFTS,
   SHIFT_LABELS,
+  SHIFT_SHORT,
   STATUS_LABELS,
   cx,
   daysAgoISO,
@@ -37,13 +40,37 @@ import {
   todayISO,
 } from '../lib/utils'
 
+/** Koliko dana odmah, i koliko se dodaje na Prikaži više. */
+const DAYS_FIRST = 3
+const DAYS_STEP = 3
+/** Kolone tabele dnevnih obaveza na računaru: dan, obaveza, prva smena, druga smena. */
+const TASK_COLS = 'md:grid-cols-[150px_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)] md:gap-x-6'
+const TASK_GRID = `flex flex-wrap items-center gap-x-3 gap-y-2 md:grid md:items-center ${TASK_COLS}`
+const TASK_FIRST = 5
+const TASK_STEP = 5
+
+/** Dugmad ispod liste dana: prvo Prikaži više, a ispod nje Prikaži sve. */
+function MoreButtons({ shown, total, onMore, onAll }) {
+  if (shown >= total) return null
+  return (
+    <div className="space-y-2 border-t border-stone-200 p-3">
+      <Button variant="secondary" className="w-full" onClick={onMore}>
+        Prikaži više
+      </Button>
+      <Button variant="ghost" className="w-full" onClick={onAll}>
+        Prikaži sve ({total - shown} dana više)
+      </Button>
+    </div>
+  )
+}
+
 const QUICK_RANGES = [
-  { label: 'Danas', from: () => todayISO(), to: () => todayISO() },
-  { label: 'Juče i danas', from: () => daysAgoISO(1), to: () => todayISO() },
-  { label: '7 dana', from: () => daysAgoISO(6), to: () => todayISO() },
-  { label: '30 dana', from: () => daysAgoISO(29), to: () => todayISO() },
-  { label: 'Tekući mesec', from: () => thisMonth().from, to: () => thisMonth().to, month: true },
-  { label: 'Prošli mesec', from: () => prevMonth().from, to: () => prevMonth().to, month: true },
+  { key: 'danas', label: 'Danas', from: () => todayISO(), to: () => todayISO() },
+  { key: 'juce', label: 'Juče i danas', from: () => daysAgoISO(1), to: () => todayISO() },
+  { key: 'sedam', label: '7 dana', from: () => daysAgoISO(6), to: () => todayISO() },
+  { key: 'trideset', label: '30 dana', from: () => daysAgoISO(29), to: () => todayISO() },
+  { key: 'tekuci', label: 'Tekući mesec', from: () => thisMonth().from, to: () => thisMonth().to, month: true },
+  { key: 'prosli', label: 'Prošli mesec', from: () => prevMonth().from, to: () => prevMonth().to, month: true },
 ]
 
 /** Prvi i poslednji dan meseca u kojem smo sada (YYYY-MM-DD) — ceo mesec, ne samo do danas. */
@@ -78,11 +105,28 @@ export default function AdminDashboard() {
   const [workers, setWorkers] = useState([])
 
   // Podrazumevano se vide samo juče i danas — ostalo se otvara kroz filtere.
-  const [from, setFrom] = usePersistentState('dash.from', daysAgoISO(1))
-  const [to, setTo] = usePersistentState('dash.to', todayISO())
-  const [shift, setShift] = usePersistentState('dash.shift', '')
-  const [status, setStatus] = usePersistentState('dash.status', '')
-  const [worker, setWorker] = usePersistentState('dash.worker', '')
+  // Izbor perioda i filtera ostaje i posle odjave, dok ga ne promeniš. Brzi izbor se pamti
+  // kao ime (npr. Tekući mesec), a ne kao datumi — pa i sledećeg meseca važi novi mesec.
+  const [rangeKey, setRangeKey] = usePermanentState('dash.range', 'juce')
+  const [customFrom, setCustomFrom] = usePermanentState('dash.customFrom', daysAgoISO(1))
+  const [customTo, setCustomTo] = usePermanentState('dash.customTo', todayISO())
+  const preset = QUICK_RANGES.find((r) => r.key === rangeKey)
+  const from = preset ? preset.from() : customFrom
+  const to = preset ? preset.to() : customTo
+  // Ručno menjanje jednog datuma prelazi na proizvoljan period, od trenutno prikazanog.
+  const setFrom = (value) => {
+    setCustomFrom(value)
+    setCustomTo(to)
+    setRangeKey('custom')
+  }
+  const setTo = (value) => {
+    setCustomFrom(from)
+    setCustomTo(value)
+    setRangeKey('custom')
+  }
+  const [shift, setShift] = usePermanentState('dash.shift', '')
+  const [status, setStatus] = usePermanentState('dash.status', '')
+  const [worker, setWorker] = usePermanentState('dash.worker', '')
   const [filtersOpen, setFiltersOpen] = usePersistentState('dash.filtersOpen', false)
 
   const [search, setSearch] = usePersistentState('dash.search', '')
@@ -259,21 +303,52 @@ export default function AdminDashboard() {
     return Array.from(map.entries())
   }, [visibleReports])
 
+  /* Koliko dana se odmah vidi u listi i u dnevnim obavezama; ostalo otvaraju dugmad
+     „Prikaži više“ (još 3 dana) i „Prikaži sve“. Pri promeni filtera kreće ispočetka. */
+  const [dayLimit, setDayLimit] = useState(DAYS_FIRST)
+  const [taskLimit, setTaskLimit] = useState(TASK_FIRST)
+  const [tasksOpen, setTasksOpen] = usePersistentState('dash.tasksOpen', false)
+  useEffect(() => {
+    setDayLimit(DAYS_FIRST)
+    setTaskLimit(TASK_FIRST)
+  }, [rangeFrom, rangeTo, shift, status, worker, quick])
+  const listDays = byDate.slice(0, dayLimit)
+
+  /* Dnevne obaveze: za svaki dan iz perioda — da li je obaveza urađena u svakoj smeni. */
+  const [ruleDocs, setRuleDocs] = useState([])
+  useEffect(() => {
+    supabase
+      .from('rule_docs')
+      .select('title, body')
+      .then(({ data }) => setRuleDocs(data ?? []))
+  }, [])
+  const taskDays = useMemo(() => {
+    const map = new Map()
+    for (const r of reports) {
+      if (!map.has(r.report_date)) map.set(r.report_date, [])
+      map.get(r.report_date).push(r)
+    }
+    for (const list of map.values()) list.sort((a, b) => shiftRank(a.shift) - shiftRank(b.shift))
+    return Array.from(map.entries())
+  }, [reports])
+  const taskCounts = useMemo(() => {
+    const closed = reports.filter((r) => r.status !== 'otvoren')
+    return { done: closed.filter((r) => r.daily_task_done).length, total: closed.length }
+  }, [reports])
+
   function applyQuickRange(range) {
-    setFrom(range.from())
-    setTo(range.to())
+    setRangeKey(range.key)
   }
 
   function resetFilters() {
-    setFrom(daysAgoISO(1))
-    setTo(todayISO())
+    setRangeKey('juce')
     setShift('')
     setStatus('')
     setWorker('')
   }
 
   /* Kratak opis izabranih filtera — vidi se i kad je meni zatvoren. */
-  const activeRange = QUICK_RANGES.find((r) => r.from() === from && r.to() === to)
+  const activeRange = preset
   const extraCount = [shift, status, worker].filter(Boolean).length
 
   const filterSummary = [
@@ -490,7 +565,7 @@ export default function AdminDashboard() {
               <p className="label">Period</p>
               <div className="grid grid-cols-3 gap-1.5 md:grid-cols-6">
                 {QUICK_RANGES.map((range) => {
-                  const active = from === range.from() && to === range.to()
+                  const active = rangeKey === range.key
                   return (
                     <button
                       key={range.label}
@@ -753,7 +828,7 @@ export default function AdminDashboard() {
           />
         ) : (
           <div>
-            {byDate.map(([date, dayReports]) => {
+            {listDays.map(([date, dayReports]) => {
               const dayTotal = dayReports.reduce((s, r) => s + Number(r.total_amount ?? 0), 0)
               return (
                 <div key={date} className="border-t-[6px] border-stone-200/70 first:border-t-0">
@@ -792,9 +867,130 @@ export default function AdminDashboard() {
                 </div>
               )
             })}
+            <MoreButtons
+              shown={listDays.length}
+              total={byDate.length}
+              onMore={() => setDayLimit((n) => n + DAYS_STEP)}
+              onAll={() => setDayLimit(byDate.length)}
+            />
           </div>
         )}
       </Card>
+
+      {/* ---------- Dnevne obaveze: da li su urađene po danima i smenama ---------- */}
+      {taskDays.length > 0 && (
+        <Card>
+          {/* Padajući meni: zatvoren je dok se ne klikne, a gore se vidi koliko je urađeno. */}
+          <button
+            type="button"
+            onClick={() => setTasksOpen((v) => !v)}
+            aria-expanded={tasksOpen}
+            className={cx(
+              'flex w-full items-center gap-2.5 px-4 py-3.5 text-left transition',
+              tasksOpen ? 'bg-stone-100' : 'hover:bg-stone-50',
+            )}
+          >
+            <svg
+              className={cx('h-4 w-4 shrink-0 text-stone-400 transition-transform', tasksOpen && 'rotate-90')}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-extrabold tracking-tight text-stone-900">Dnevne obaveze</span>
+              <span className="block text-xs text-stone-400">
+                urađeno {taskCounts.done} od {taskCounts.total} smena
+              </span>
+            </span>
+          </button>
+          {tasksOpen && (
+          <>
+          {/* Na računaru: tabela sa jednakim kolonama, da se odmah vidi šta je šta. */}
+          <div className={`hidden border-t border-stone-100 bg-stone-50 px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-stone-400 md:grid ${TASK_COLS}`}>
+            <span>Dan</span>
+            <span>Obaveza</span>
+            <span>Prva smena</span>
+            <span>Druga smena</span>
+          </div>
+          <ul className="divide-y divide-stone-100 border-t border-stone-100">
+            {taskDays.slice(0, taskLimit).map(([date, list]) => {
+              const task = dailyTaskFor(ruleDocs, date)
+              const text = task.text
+                .split('\n')
+                .map((l) => l.replace(/^[\s>*\-•#]+/, '').trim())
+                .filter(Boolean)
+                .slice(0, 2)
+                .join(' · ')
+              const when = new Date(`${date}T00:00:00`)
+              return (
+                <li key={date} className={`px-4 py-3.5 ${TASK_GRID}`}>
+                  <p className="shrink-0 whitespace-nowrap text-[13px] font-extrabold capitalize text-stone-900">
+                    {new Intl.DateTimeFormat(LOCALE, { weekday: 'long' }).format(when)}
+                    <span className="ml-1.5 text-[12px] font-medium tabular-nums text-stone-400">
+                      {new Intl.DateTimeFormat(LOCALE, { day: '2-digit', month: '2-digit' }).format(when)}
+                    </span>
+                  </p>
+                  <p className="min-w-0 flex-1 basis-40 text-[12.5px] text-stone-500 md:truncate md:flex-none" title={text}>
+                    {text || 'Nema obaveze za ovaj dan.'}
+                  </p>
+                  {list.map((r) => {
+                    const open = r.status === 'otvoren'
+                    const done = !!r.daily_task_done
+                    const team = staffOf(r)
+                    return (
+                      <div
+                        key={r.id}
+                        className={cx(
+                          'flex min-w-0 items-center gap-2.5',
+                          r.shift === 'druga' ? 'md:col-start-4' : 'md:col-start-3',
+                        )}
+                      >
+                        <span
+                          className={cx(
+                            'shrink-0 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 ring-inset',
+                            open
+                              ? 'bg-stone-100 text-stone-500 ring-stone-200'
+                              : done
+                                ? 'bg-emerald-100 text-emerald-800 ring-emerald-600/20'
+                                : 'bg-rose-100 text-rose-700 ring-rose-600/20',
+                          )}
+                        >
+                          {SHIFT_SHORT[r.shift] ?? r.shift} · {open ? 'u toku' : done ? 'urađena' : 'nije urađena'}
+                        </span>
+                        <span className="min-w-0 text-[12.5px] font-semibold leading-snug text-stone-700">
+                          {team.length > 0
+                            ? team.map((m, i) => (
+                                <span key={`${m.name}-${i}`} className="whitespace-nowrap">
+                                  {m.name}
+                                  {m.mid && <MidMark className="ml-1 align-middle" />}
+                                  {i < team.length - 1 && ', '}
+                                </span>
+                              ))
+                            : 'nema upisanih'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </li>
+              )
+            })}
+          </ul>
+          <MoreButtons
+            shown={Math.min(taskLimit, taskDays.length)}
+            total={taskDays.length}
+            onMore={() => setTaskLimit((n) => n + TASK_STEP)}
+            onAll={() => setTaskLimit(taskDays.length)}
+          />
+          </>
+          )}
+        </Card>
+      )}
 
       {/* Šta ulazi u preuzet izveštaj */}
       <ReportPicker

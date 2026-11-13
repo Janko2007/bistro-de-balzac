@@ -9,6 +9,7 @@ import { categoryComparator, loadCategories } from '../lib/categories'
 import { heading, printDocument, statGrid, table, textBlock } from '../lib/print'
 import CompareShifts from '../components/CompareShifts'
 import DownloadIcon from '../components/DownloadIcon'
+import Avatar from '../components/Avatar'
 import MidMark from '../components/MidMark'
 import ReportPicker from '../components/ReportPicker'
 import {
@@ -22,7 +23,6 @@ import {
   FullPageLoader,
   Modal,
   MoneyInput,
-  Stat,
   Textarea,
 } from '../components/ui'
 import {
@@ -793,9 +793,9 @@ export default function ReportDetail() {
                 ko ju je otvorio ne mora da bude među njima. */}
             <p className="mt-1 text-[12px] text-stone-400">{formatDateTime(report.created_at)}</p>
             {report.status === 'potvrdjen' && report.verified_at && (
-              <p className="mt-1 text-[12px] font-medium text-emerald-700">
-                Potvrdio {report.verifier?.full_name || 'admin'} ·{' '}
-                {formatDateTime(report.verified_at)}
+              <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[12px] font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-600/20">
+                <span aria-hidden="true">✓</span>
+                Potvrdio {report.verifier?.full_name || 'admin'} · {formatDateTime(report.verified_at)}
               </p>
             )}
           </div>
@@ -830,22 +830,46 @@ export default function ReportDetail() {
             </p>
           </div>
         ) : (
-          <div className="space-y-3 border-t border-stone-200 p-4">
-            <p className="eyebrow">
-              Obračun smene
-            </p>
+          <div className="border-t border-stone-200 p-4">
+            <p className="eyebrow">Obračun smene</p>
 
-            {/* Pazar, kartice, pa predato — predato = pazar − kartice. */}
-            <div className="grid grid-cols-2 gap-2">
-              <Stat label="Pazar" value={formatMoney(report.total_amount, false)} tone="total" />
-              <Stat label="Kartice" value={formatMoney(report.card_amount, false)} />
-            </div>
+            {/* Pazar je veliki broj; ispod njega traka koliko je keš (predato) a koliko kartice. */}
+            {(() => {
+              const total = Number(report.total_amount ?? 0)
+              const cash = Number(report.cash_amount ?? 0)
+              const card = Number(report.card_amount ?? 0)
+              const cashShare = total > 0 ? Math.min(100, Math.max(0, (cash / total) * 100)) : 0
+              return (
+                <div className="mt-3 rounded-2xl bg-ink px-4 py-4 text-white">
+                  <p className="eyebrow text-stone-400">Pazar</p>
+                  <p className="mt-0.5 text-4xl font-extrabold tabular-nums tracking-tight">
+                    {formatMoney(total, false)}
+                  </p>
+                  <div
+                    className="mt-3 flex h-2 overflow-hidden rounded-full bg-white/15"
+                    role="img"
+                    aria-label={`Predato ${Math.round(cashShare)}%, kartice ${total > 0 ? 100 - Math.round(cashShare) : 0}%`}
+                  >
+                    <div className="h-full bg-brand-500" style={{ width: `${cashShare}%` }} />
+                    <div className="h-full bg-white/80" style={{ width: `${total > 0 ? 100 - cashShare : 0}%` }} />
+                  </div>
+                </div>
+              )
+            })()}
 
-            <div className="flex items-center justify-between gap-3 rounded-2xl bg-ink px-4 py-3.5 text-white">
-              <p className="eyebrow text-stone-400">Predato</p>
-              <p className="text-2xl font-extrabold tabular-nums">
-                {formatMoney(report.cash_amount, false)}
-              </p>
+            <div className="mt-2.5 grid grid-cols-2 gap-2">
+              <div className="rounded-2xl bg-brand-50 px-4 py-3 ring-1 ring-inset ring-brand-600/20">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-700">Predato</p>
+                <p className="mt-0.5 text-xl font-extrabold tabular-nums text-brand-700">
+                  {formatMoney(report.cash_amount, false)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-stone-100 px-4 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500">Kartice</p>
+                <p className="mt-0.5 text-xl font-extrabold tabular-nums text-stone-900">
+                  {formatMoney(report.card_amount, false)}
+                </p>
+              </div>
             </div>
           </div>
         )}
@@ -872,7 +896,11 @@ export default function ReportDetail() {
                   return (
                     <li key={entry.profile.id} className="py-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-semibold text-stone-800">
+                      <span className="flex min-w-0 flex-1 items-center gap-2.5 text-sm font-semibold text-stone-800">
+                        <Avatar
+                          name={entry.profile.full_name}
+                          className="h-8 w-8 shrink-0 bg-stone-200 text-[11px] text-stone-700"
+                        />
                         <span className="truncate">{entry.profile.full_name}</span>
                         {midIds.has(entry.profile.id) && <MidMark />}
                       </span>
@@ -1074,7 +1102,7 @@ export default function ReportDetail() {
           <p className="px-4 py-8 text-center text-[13px] text-stone-400">Nema slika.</p>
         ) : (
           <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4">
-            {imageUrls.map((img) => (
+            {imageUrls.map((img, index) => (
               <button
                 key={img.id}
                 type="button"
@@ -1083,10 +1111,13 @@ export default function ReportDetail() {
               >
                 <img
                   src={img.url}
-                  alt="Slika izveštaja sa kase i aparata za kartice"
+                  alt={`Slika ${index + 1} izveštaja sa kase i aparata za kartice`}
                   loading="lazy"
                   className="h-full w-full object-cover transition group-hover:scale-105"
                 />
+                <span className="absolute left-2 top-2 rounded-full bg-stone-900/70 px-2 py-0.5 text-[11px] font-bold text-white">
+                  Slika {index + 1}
+                </span>
                 <span className="absolute inset-x-0 bottom-0 bg-stone-900/60 py-1 text-center text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100">
                   Uvećaj
                 </span>
@@ -1386,7 +1417,7 @@ export default function ReportDetail() {
           `safe-area-inset-bottom` traka bi upala pod nju. Na računaru nema
           navigacije, pa ide na dno, sa malo vazduha ispod dugmadi. */}
       {isAdmin && (
-        <div className="fixed inset-x-0 bottom-[calc(var(--nav-h,57px)+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-2 backdrop-blur lg:bottom-0 lg:py-3 lg:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
+        <div className="fixed inset-x-0 bottom-[var(--bar-bottom,calc(57px+env(safe-area-inset-bottom,0px)))] z-20 border-t border-stone-200 bg-white/95 px-4 py-2 pb-[calc(0.5rem+var(--bar-pad,0px))] backdrop-blur lg:bottom-0 lg:py-3 lg:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
           <div className="relative mx-auto flex max-w-6xl items-center gap-2">
             {report.status !== 'potvrdjen' ? (
               <Button

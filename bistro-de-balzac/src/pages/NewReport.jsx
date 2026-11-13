@@ -1996,11 +1996,7 @@ export default function NewReport() {
               <Badge className="shrink-0 bg-rose-100 text-rose-700 ring-rose-600/20">
                 obavezno
               </Badge>
-            ) : (
-              <Badge className="shrink-0 bg-emerald-100 text-emerald-800 ring-emerald-600/20">
-                {images.length}/6
-              </Badge>
-            )
+            ) : null
           }
         />
         <div className="space-y-3 p-4">
@@ -2025,6 +2021,18 @@ export default function NewReport() {
             className="hidden"
           />
 
+          {/* Pravilo je kratko koliko može, ali mora da ostane: dve slike, i koji
+              izveštaj sa aparata ide na prvu zavisi od smene. Dva reda, jedan ispod drugog. */}
+          <div className="space-y-1 text-[13px] leading-snug text-stone-500">
+            <p>
+              Na prvoj slici: <strong className="text-stone-700">prodaja po operateru</strong> i{' '}
+              <strong className="text-stone-700">{terminalReportOf(shift)}</strong>.
+            </p>
+            <p>
+              Na drugoj slici: <strong className="text-stone-700">izveštaj</strong> (pazar, kartice i predato).
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <Button
               type="button"
@@ -2044,13 +2052,6 @@ export default function NewReport() {
               Galerija
             </Button>
           </div>
-
-          {/* Pravilo je kratko koliko može, ali mora da ostane: jedna slika,
-              dva izveštaja, i koji od dva sa aparata zavisi od smene. */}
-          <p className="hint">
-            Na jednoj slici: <strong>prodaja po operateru</strong> i{' '}
-            <strong>{terminalReportOf(shift)}</strong>.
-          </p>
 
           {images.length > 0 && (
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
@@ -2215,7 +2216,7 @@ export default function NewReport() {
           se dodaje i `safe-area-inset-bottom`, inače bi traka upala pod nju.
           Na računaru nema donje navigacije, pa je traka na samom dnu. */}
       {showCloseBar && (
-      <div className="fixed inset-x-0 bottom-[calc(var(--nav-h,57px)+env(safe-area-inset-bottom,0px))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
+      <div className="fixed inset-x-0 bottom-[var(--bar-bottom,calc(57px+env(safe-area-inset-bottom,0px)))] z-20 border-t border-stone-200 bg-white/95 px-4 py-3 pb-[calc(0.75rem+var(--bar-pad,0px))] backdrop-blur lg:bottom-0 lg:py-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="eyebrow">Predato</p>
