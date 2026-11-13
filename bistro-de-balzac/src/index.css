@@ -166,7 +166,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  top: -26px;
+  top: -10px;
   pointer-events: none;
   background: linear-gradient(to top, rgba(245, 245, 244, 0.97) 0%, rgba(245, 245, 244, 0.86) 55%, rgba(245, 245, 244, 0) 100%);
   -webkit-backdrop-filter: blur(14px);
